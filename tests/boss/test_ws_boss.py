@@ -27,6 +27,11 @@ class FakeSession:
         )
 
 
+class FailOpenSession(FakeSession):
+    async def open(self) -> None:
+        raise RuntimeError("cdp unavailable")
+
+
 @pytest.fixture()
 def client(monkeypatch):
     fake = FakeSession()
@@ -62,3 +67,58 @@ def test_boss_open_and_search(client):
         assert any(
             m["type"] == "boss.status" and m.get("state") == "done" for m in msgs
         )
+
+
+def test_boss_search_busy(monkeypatch):
+    fake = FakeSession()
+
+    class AlwaysLocked:
+        def locked(self) -> bool:
+            return True
+
+    monkeypatch.setattr(server, "boss_session", fake, raising=False)
+    monkeypatch.setattr(server, "_search_lock", AlwaysLocked(), raising=False)
+    with TestClient(server.app) as c:
+        with c.websocket_connect("/ws") as ws:
+            assert ws.receive_json()["type"] == "hello"
+            ws.send_json({"type": "boss.search"})
+            err = ws.receive_json()
+            assert err["type"] == "boss.error"
+            assert err["code"] == "busy"
+
+
+def test_boss_open_launch_failed(monkeypatch):
+    fake = FailOpenSession()
+    monkeypatch.setattr(server, "boss_session", fake, raising=False)
+    monkeypatch.setattr(server, "_search_lock", asyncio.Lock(), raising=False)
+    with TestClient(server.app) as c:
+        with c.websocket_connect("/ws") as ws:
+            assert ws.receive_json()["type"] == "hello"
+            ws.send_json({"type": "boss.open"})
+            launching = ws.receive_json()
+            assert launching == {"type": "boss.status", "state": "launching"}
+            err = ws.receive_json()
+            assert err["type"] == "boss.error"
+            assert err["code"] == "launch_failed"
+            assert "cdp unavailable" in err["message"]
+            status = ws.receive_json()
+            assert status["type"] == "boss.status"
+            assert status["state"] == "error"
+
+
+def test_boss_close(client):
+    c, fake = client
+    with c.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        ws.send_json({"type": "boss.open"})
+        for _ in range(3):
+            status = ws.receive_json()
+            if status.get("state") == "ready":
+                break
+        ws.send_json({"type": "boss.close"})
+        closed = ws.receive_json()
+        assert closed["type"] == "boss.status"
+        assert closed["state"] == "done"
+        assert closed.get("message") == "closed"
+        assert fake.closed is True
+        assert fake.is_open is False

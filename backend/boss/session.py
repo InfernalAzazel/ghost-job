@@ -60,10 +60,8 @@ class BossSession:
         contexts = self._browser.contexts
         if not contexts:
             raise RuntimeError("CDP 已连接但没有 browser context")
-        context = contexts[0]
-        if context.pages:
-            return context.pages[0]
-        return await context.new_page()
+        # Prefer a fresh tab so we never navigate away from the user's active page.
+        return await contexts[0].new_page()
 
     async def search(self, url: str | None = None) -> tuple[str, list[Job], str]:
         if self._browser is None:
