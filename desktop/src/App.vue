@@ -57,8 +57,12 @@ function handleWsMessage(data: WsInbound) {
     return
   }
   if (data.type === 'boss.status') {
-    bossState.value = data.state || ''
-    if (data.state === 'navigating') bossBusy.value = true
+    if (data.state === 'error') {
+      bossState.value = data.message ? `error: ${data.message}` : data.state || ''
+    } else {
+      bossState.value = data.state || ''
+    }
+    if (data.state === 'navigating' || data.state === 'launching') bossBusy.value = true
     if (
       data.state === 'done' ||
       data.state === 'need_login' ||
