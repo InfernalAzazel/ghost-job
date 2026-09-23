@@ -1,0 +1,21 @@
+[project]
+name = "ghostjob"
+version = "0.1.0"
+description = "Ghostjob desktop shell — Electron + Vue + Python"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.141.1",
+    "patchright>=1.63.0",
+]
+
+[project.scripts]
+ghostjob-backend = "backend.server:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
