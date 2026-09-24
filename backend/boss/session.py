@@ -51,6 +51,21 @@ def _should_stop_scroll(*, stop: bool, empty_streak: int, batch_idx: int) -> boo
     return stop or empty_streak >= 2 or batch_idx >= MAX_SCROLL_BATCHES
 
 
+def _next_empty_streak(empty_streak: int, *, dom_grew: bool, got_new_jobs: bool) -> int:
+    if dom_grew or got_new_jobs:
+        return 0
+    return empty_streak + 1
+
+
+def _seen_key(info: JobInfo, index: int) -> str:
+    """Stable dedupe key across scroll batches (job_id → link → title|index)."""
+    if info.job_id:
+        return info.job_id
+    if info.link:
+        return info.link
+    return f"{info.title}|{index}"
+
+
 def api_item_by_job_id(items: list[dict[str, Any]], job_id: str | None) -> dict[str, Any] | None:
     if not job_id:
         return None
@@ -275,7 +290,8 @@ class BossSession:
                 print(f"[boss] card[{i}] 列表字段失败: {exc}", flush=True)
                 info = JobInfo(title=f"card-{i}")
 
-            if info.job_id and info.job_id in seen:
+            key = _seen_key(info, i)
+            if key in seen:
                 continue
 
             list_detail = job_detail_from_list_item(api_item_by_job_id(api_items, info.job_id))
@@ -327,8 +343,7 @@ class BossSession:
             job = Job(info=info, detail=detail)
             print_job(job)
             enriched.append(job)
-            if info.job_id:
-                seen.add(info.job_id)
+            seen.add(key)
             if on_job is not None:
                 maybe = on_job(job)
                 if inspect.isawaitable(maybe):
@@ -430,10 +445,11 @@ class BossSession:
                 except Exception:  # noqa: BLE001
                     await page.wait_for_timeout(1_500)
                 after = await page.locator(CARD_SELECTOR).count()
-                if after <= prev_count and not new_jobs:
-                    empty_streak += 1
-                else:
-                    empty_streak = 0
+                empty_streak = _next_empty_streak(
+                    empty_streak,
+                    dom_grew=after > prev_count,
+                    got_new_jobs=bool(new_jobs),
+                )
                 batch_idx += 1
 
             state = "stopped" if self._stopped() else "done"
