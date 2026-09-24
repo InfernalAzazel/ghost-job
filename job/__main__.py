@@ -1,4 +1,4 @@
-"""Start Ghostjob via Reflex.
+"""Start Ghost Job via Reflex.
 
 Usage (from repo root)::
 

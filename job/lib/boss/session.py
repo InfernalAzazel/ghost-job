@@ -88,7 +88,7 @@ def _merge_api_items(api_items: list[dict[str, Any]], items: list[dict[str, Any]
 
 
 def default_user_data_dir() -> Path:
-    return Path.home() / ".ghostjob" / "chrome-profile"
+    return Path.home() / ".ghost-job" / "chrome-profile"
 
 
 class BossSession:

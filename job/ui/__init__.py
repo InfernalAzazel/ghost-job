@@ -1,1 +1,1 @@
-"""Ghostjob Reflex UI package."""
+"""Ghost Job Reflex UI package."""

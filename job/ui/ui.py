@@ -5,7 +5,7 @@ from job.ui.state import BossState
 
 def index() -> rx.Component:
     return rx.container(
-        rx.heading("Ghostjob", size="8"),
+        rx.heading("Ghost Job", size="8"),
         rx.hstack(
             rx.button("打开 BOSS", on_click=BossState.open_boss, disabled=BossState.busy),
             rx.button(
@@ -51,4 +51,4 @@ def index() -> rx.Component:
 
 
 app = rx.App()
-app.add_page(index, route="/", title="Ghostjob")
+app.add_page(index, route="/", title="Ghost Job")

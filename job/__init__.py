@@ -1,1 +1,1 @@
-"""Ghostjob application package — start with ``uv run python -m job``."""
+"""Ghost Job application package — start with ``uv run python -m job``."""

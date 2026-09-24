@@ -1,7 +1,7 @@
 [project]
-name = "ghostjob"
+name = "ghost-job"
 version = "0.1.0"
-description = "Ghostjob — Reflex UI + Patchright BOSS scraper"
+description = "Ghost Job — Reflex UI + Patchright BOSS scraper"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
