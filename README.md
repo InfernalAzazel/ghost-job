@@ -17,7 +17,10 @@ desktop/src (Vue)  --WebSocket /ws-->  backend/server.py
 # 仓库根目录
 uv sync
 
-# 桌面端
+# Reflex UI（迁移中）
+uv run reflex run
+
+# 桌面端（Electron + Vue，逐步退役）
 cd desktop
 npm install
 npm run dev
@@ -27,20 +30,15 @@ npm run dev
 
 ## BOSS 列表（v1）
 
-用 Patchright CDP 附着本机 Chrome（不另开独立 profile）。
+用 Patchright 拉起本机 Google Chrome（独立 profile：`~/.ghostjob/chrome-profile`），无需调试端口。
 
-1. 完全退出 Chrome 后，用调试端口启动，例如：
-
-    ```bash
-    /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
-    ```
-
+1. 安装本机 Google Chrome。
 2. `uv sync` 后启动桌面或单独后端。
-3. 点击「连接 Chrome」→「抓列表」。
-4. 可选：`GHOSTJOB_CDP_URL` 覆盖默认 `http://127.0.0.1:9222`。
+3. 点击「打开 BOSS」→ 在弹出的 Chrome 中登录（首次）。
+4. 点击「抓列表+详情」：会依次点击当前页每张职位卡，抓 JD，并在**后端终端**打印。
 
 默认搜索：广州 · AI应用开发（见 `backend/boss/jobs.py` 中 `DEFAULT_SEARCH_URL`）。
-退出 Ghostjob 不会关闭你的 Chrome。
+退出 Ghostjob 会关闭该自动化 Chrome 窗口，但保留 profile 登录态。
 
 ## 单独跑后端
 

@@ -1,7 +1,7 @@
 [project]
 name = "ghostjob"
 version = "0.1.0"
-description = "Ghostjob desktop shell — Electron + Vue + Python"
+description = "Ghostjob — Reflex UI + Python BOSS automation"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
