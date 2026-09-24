@@ -1,6 +1,6 @@
 import reflex as rx
 
-from ghostjob.state import BossState
+from job.ui.state import BossState
 
 
 def index() -> rx.Component:

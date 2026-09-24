@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from backend.boss.session import default_user_data_dir
+from job.lib.boss.session import default_user_data_dir
 
 
 def test_default_user_data_dir_under_home(monkeypatch, tmp_path: Path):

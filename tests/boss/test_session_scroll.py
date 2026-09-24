@@ -1,5 +1,5 @@
-from backend.boss.jobs import JobInfo
-from backend.boss.session import _next_empty_streak, _seen_key, _should_stop_scroll
+from job.lib.boss.jobs import JobInfo
+from job.lib.boss.session import _next_empty_streak, _seen_key, _should_stop_scroll
 
 
 def test_stop_flag_ends_scroll():

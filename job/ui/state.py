@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import reflex as rx
 
-from backend.boss.jobs import DEFAULT_SEARCH_URL, job_to_dict
-from backend.boss.session import BossSession
+from job.lib.boss.jobs import DEFAULT_SEARCH_URL, job_to_dict
+from job.lib.boss.session import BossSession
 
 _session = BossSession()
 

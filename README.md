@@ -2,11 +2,20 @@
 
 Reflex UI + Patchright（本机 Chrome）抓取 BOSS 直聘列表与详情。
 
+## 结构
+
+```text
+job/
+  __main__.py  # uv run python -m job
+  ui/          # Reflex 页面与 State
+  lib/boss/    # 抓取会话与解析
+```
+
 ## 开发
 
 ```bash
 uv sync
-uv run reflex run
+uv run python -m job
 ```
 
 1. 安装 Google Chrome

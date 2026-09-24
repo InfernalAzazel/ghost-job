@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from backend.boss.jobs import (
+from job.lib.boss.jobs import (
     Job,
     JobDetail,
     JobInfo,
@@ -70,7 +70,7 @@ def test_job_to_dict_includes_hr_and_address():
 
 
 def test_job_detail_from_list_item_hr():
-    from backend.boss.jobs import job_detail_from_list_item
+    from job.lib.boss.jobs import job_detail_from_list_item
 
     d = job_detail_from_list_item({"bossName": "李四", "bossTitle": "HRBP"})
     assert d.hr_name == "李四"
@@ -80,7 +80,7 @@ def test_job_detail_from_list_item_hr():
 
 
 def test_job_detail_from_detail_payload():
-    from backend.boss.jobs import job_detail_from_detail_payload
+    from job.lib.boss.jobs import job_detail_from_detail_payload
 
     d = job_detail_from_detail_payload(
         {
@@ -100,7 +100,7 @@ def test_job_detail_from_detail_payload():
 
 
 def test_merge_job_detail_fills_empty_only():
-    from backend.boss.jobs import JobDetail, merge_job_detail
+    from job.lib.boss.jobs import JobDetail, merge_job_detail
 
     merged = merge_job_detail(
         JobDetail(hr_name="API-HR", description="API desc"),
@@ -137,14 +137,14 @@ def test_parse_jobs_from_job_card_wrapper():
 
 
 def test_looks_like_font_encrypted_detects_pua():
-    from backend.boss.jobs import looks_like_font_encrypted
+    from job.lib.boss.jobs import looks_like_font_encrypted
 
     assert looks_like_font_encrypted("-K") is True
     assert looks_like_font_encrypted("25-40K") is False
 
 
 def test_resolve_salary_prefers_api_map():
-    from backend.boss.jobs import resolve_salary
+    from job.lib.boss.jobs import resolve_salary
 
     salary = resolve_salary(
         dom_salary="-K",
@@ -157,7 +157,7 @@ def test_resolve_salary_prefers_api_map():
 
 
 def test_salary_map_from_joblist_payload():
-    from backend.boss.jobs import salary_map_from_joblist_payload
+    from job.lib.boss.jobs import salary_map_from_joblist_payload
 
     payload = {
         "zpData": {
@@ -172,7 +172,7 @@ def test_salary_map_from_joblist_payload():
 
 
 def test_job_info_from_api_item():
-    from backend.boss.jobs import job_info_from_api_item
+    from job.lib.boss.jobs import job_info_from_api_item
 
     info = job_info_from_api_item(
         {

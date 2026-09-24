@@ -9,7 +9,7 @@ from urllib.parse import urljoin
 
 from patchright.async_api import BrowserContext, Locator, Page, Response, async_playwright
 
-from backend.boss.jobs import (
+from job.lib.boss.jobs import (
     ADDRESS_SELECTORS,
     BASE_URL,
     CARD_SELECTOR,
