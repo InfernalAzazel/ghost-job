@@ -1,18 +1,15 @@
 [project]
 name = "ghostjob"
 version = "0.1.0"
-description = "Ghostjob — Reflex UI + Python BOSS automation"
+description = "Ghostjob — Reflex UI + Patchright BOSS scraper"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi[standard]>=0.141.1",
     "patchright>=1.63.0",
+    "pydantic>=2.0",
     "pyquery>=2.1.0",
     "reflex>=0.9.12",
 ]
-
-[project.scripts]
-ghostjob-backend = "backend.server:main"
 
 [dependency-groups]
 dev = [

@@ -1,6 +1,3 @@
-"""Backend entrypoint — spawned by Electron Main."""
+"""Use: uv run reflex run"""
 
-from backend.server import main
-
-if __name__ == "__main__":
-    main()
+raise SystemExit("Use `uv run reflex run` to start Ghostjob.")
