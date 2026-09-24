@@ -7,6 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]>=0.141.1",
     "patchright>=1.63.0",
+    "pyquery>=2.1.0",
+    "reflex>=0.9.12",
 ]
 
 [project.scripts]

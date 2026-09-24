@@ -1,11 +1,9 @@
-from backend.boss.session import DEFAULT_CDP_URL, resolve_cdp_url
+from pathlib import Path
+
+from backend.boss.session import default_user_data_dir
 
 
-def test_resolve_cdp_url_default(monkeypatch):
-    monkeypatch.delenv("GHOSTJOB_CDP_URL", raising=False)
-    assert resolve_cdp_url() == DEFAULT_CDP_URL
-
-
-def test_resolve_cdp_url_from_env(monkeypatch):
-    monkeypatch.setenv("GHOSTJOB_CDP_URL", "http://127.0.0.1:9333")
-    assert resolve_cdp_url() == "http://127.0.0.1:9333"
+def test_default_user_data_dir_under_home(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    d = default_user_data_dir()
+    assert d == tmp_path / ".ghostjob" / "chrome-profile"

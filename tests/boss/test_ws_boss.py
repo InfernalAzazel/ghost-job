@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend import server
-from backend.boss.jobs import Job
+from backend.boss.jobs import Job, JobInfo
 
 
 class FakeSession:
@@ -22,7 +22,7 @@ class FakeSession:
     async def search(self, url: str | None = None):
         return (
             url or "https://example.test/jobs",
-            [Job("T", "C", "10K", "https://example.test/j/1", "1")],
+            [Job(info=JobInfo(title="T", company="C", salary="10K", link="https://example.test/j/1", job_id="1"))],
             "done",
         )
 
