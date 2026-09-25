@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from pydantic_ai.exceptions import ModelHTTPError
-from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from job.boss.jobs import Job
@@ -17,14 +18,14 @@ JOB = Job(title="AI Agent 开发工程师", company="某科技", description="�
 
 
 def _reviewer_answering(match: bool, reason: str, prompts: list[str] | None = None):
-    """复核器的模型换成本地函数：记录提示词，按给定结论调用输出工具。"""
+    """复核器的模型换成本地函数：记录提示词，按给定结论回复 JSON 文本。"""
 
     def answer(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        assert not info.output_tools, "不能走工具调用，DeepSeek 思考模式会拒绝"
         if prompts is not None:
             prompts.append(str(messages[-1].parts[-1].content))
-        tool = info.output_tools[0].name
-        args = {"match": match, "reason": reason}
-        return ModelResponse(parts=[ToolCallPart(tool, args)])
+        text = json.dumps({"match": match, "reason": reason}, ensure_ascii=False)
+        return ModelResponse(parts=[TextPart(text)])
 
     reviewer = JobReviewer(requirement="只投 Agent", llm=LLM)
     return reviewer, reviewer.agent.override(model=FunctionModel(answer))
@@ -72,5 +73,7 @@ def test_api_key_is_trimmed():
     assert LlmSettings(api_key="  sk-1 \n").api_key == "sk-1"
 
 
-def test_unknown_model_falls_back_to_default():
-    assert LlmSettings(model="deepseek-chat").model == LlmSettings.MODELS[0]
+def test_ready_needs_key_and_model():
+    assert not LlmSettings(api_key="k").ready
+    assert not LlmSettings(model="deepseek-v4-pro").ready
+    assert LLM.ready

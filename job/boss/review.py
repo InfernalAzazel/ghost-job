@@ -7,7 +7,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent
+from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.deepseek import DeepSeekProvider
@@ -49,14 +49,18 @@ class JobReviewer(BaseModel):
 
     @cached_property
     def agent(self) -> Agent[None, Verdict]:
-        """DeepSeek 结构化输出 Agent（关闭思考模式，输出更稳定）。"""
+        """DeepSeek 复核 Agent。
+
+        结论走提示词 JSON 输出而非工具调用：DeepSeek 思考模式拒绝强制 ``tool_choice``，
+        而 Pydantic AI 对不认识的模型名（如 ``deepseek-flash``）无法关闭思考。
+        """
         model = OpenAIChatModel(
             self.llm.model,
             provider=DeepSeekProvider(api_key=self.llm.api_key),
         )
         return Agent(
             model,
-            output_type=Verdict,
+            output_type=PromptedOutput(Verdict),
             instructions=self.INSTRUCTIONS,
             model_settings=OpenAIChatModelSettings(
                 thinking=False, temperature=0, timeout=self.timeout

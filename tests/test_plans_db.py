@@ -161,8 +161,13 @@ def test_ai_review_persist_and_copy(tmp_db: Path):
 def test_llm_settings_save_and_load(tmp_db: Path):
     assert LlmSettings.load() == LlmSettings()
     LlmSettings(api_key="sk-1", model="deepseek-v4-pro").save()
-    LlmSettings(api_key="sk-2", model="deepseek-v4-pro").save()
-    assert LlmSettings.load() == LlmSettings(api_key="sk-2", model="deepseek-v4-pro")
+    latest = LlmSettings(
+        api_key="sk-2",
+        model="deepseek-v4-pro",
+        models=["deepseek-v4-flash", "deepseek-v4-pro"],
+    )
+    latest.save()
+    assert LlmSettings.load() == latest
 
 
 def test_update_filters_rejects_unknown_list_field(tmp_db: Path):

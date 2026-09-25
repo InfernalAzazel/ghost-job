@@ -1,8 +1,9 @@
-"""配置中心「大模型」：DeepSeek API Key 与模型。"""
+"""配置中心「大模型」：填写 API Key → 拉取最新模型 → 选择模型。"""
 
 from __future__ import annotations
 
 import reflex as rx
+from openai import APIError
 from pydantic_ai.exceptions import AgentRunError
 
 from job.boss.jobs import Job
@@ -20,26 +21,20 @@ _SAMPLE_JOB = Job(
 
 class LlmState(rx.State):
     api_key: str = ""
-    model: str = LlmSettings.MODELS[0]
-    test_hint: str = ""
-    testing: bool = False
-
-    model_options: list[str] = list(LlmSettings.MODELS)
+    model: str = ""
+    model_options: list[str] = rx.field(default_factory=list)
+    hint: str = ""
+    busy: bool = False
 
     def _settings(self) -> LlmSettings:
-        return LlmSettings(api_key=self.api_key, model=self.model)
+        return LlmSettings(
+            api_key=self.api_key, model=self.model, models=self.model_options
+        )
 
     @rx.var
     def key_ready(self) -> bool:
-        """是否已填写 API Key。"""
-        return bool(self.api_key.strip())
-
-    @rx.var
-    def key_hint(self) -> str:
-        """API Key 输入框下的说明。"""
-        if self.api_key.strip():
-            return "已保存在本机数据库，只用于调用 DeepSeek"
-        return "在 DeepSeek 开放平台创建 API Key 后粘贴到这里"
+        """是否已填写 API Key 并选好模型（AI 复核可用）。"""
+        return bool(self.api_key.strip() and self.model)
 
     @rx.event
     def on_load(self):
@@ -47,30 +42,55 @@ class LlmState(rx.State):
         settings = LlmSettings.load()
         self.api_key = settings.api_key
         self.model = settings.model
-        self.test_hint = ""
+        self.model_options = settings.models
+        self.hint = ""
 
     @rx.event
     def set_api_key(self, value: str):
         self.api_key = value
         self._settings().save()
-        self.test_hint = ""
+        self.hint = ""
 
     @rx.event
     def set_model(self, value: str):
         self.model = value
         self._settings().save()
-        self.test_hint = ""
+        self.hint = ""
+
+    @rx.event(background=True)
+    async def fetch_models(self):
+        """用填写的 Key 拉取 DeepSeek 最新模型列表。"""
+        async with self:
+            settings = self._settings()
+            if not settings.api_key:
+                self.hint = "请先填写 API Key"
+                return
+            self.busy = True
+            self.hint = "拉取中…"
+        try:
+            models = await settings.fetch_models()
+            hint = f"已拉取 {len(models)} 个模型，请选择"
+        except APIError as exc:
+            models, hint = [], f"拉取失败：{exc.message}"
+        async with self:
+            self.busy = False
+            self.hint = hint
+            if models:
+                self.model_options = models
+                if self.model not in models:
+                    self.model = models[0]
+                self._settings().save()
 
     @rx.event(background=True)
     async def test_connection(self):
         """用样例岗位真实调用一次，确认 Key 与模型可用。"""
         async with self:
             settings = self._settings()
-            if not settings.api_key:
-                self.test_hint = "请先填写 API Key"
+            if not settings.ready:
+                self.hint = "请先填写 API Key 并选择模型"
                 return
-            self.testing = True
-            self.test_hint = "测试中…"
+            self.busy = True
+            self.hint = "测试中…"
         reviewer = JobReviewer(requirement="只投 AI 应用开发岗位", llm=settings)
         try:
             verdict = await reviewer.review(_SAMPLE_JOB)
@@ -78,5 +98,5 @@ class LlmState(rx.State):
         except AgentRunError as exc:
             hint = f"连接失败：{exc}"
         async with self:
-            self.test_hint = hint
-            self.testing = False
+            self.hint = hint
+            self.busy = False

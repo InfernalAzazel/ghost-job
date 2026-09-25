@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+import json
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic_ai.providers.deepseek import DeepSeekProvider
 from sqlmodel import Field, SQLModel
 
 
@@ -36,22 +38,29 @@ class SettingRow(SQLModel, table=True):
 
 
 class LlmSettings(BaseModel):
-    """大模型配置：API Key 与模型都在配置中心「大模型」填写，存在设置表里。"""
+    """大模型配置：先填 API Key，再拉取可用模型并选择；存在设置表里。"""
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    MODELS: ClassVar[tuple[str, ...]] = ("deepseek-v4-flash", "deepseek-v4-pro")
     # 设置表里的键前缀
     PREFIX: ClassVar[str] = "llm_"
 
     api_key: str = ""
-    model: str = MODELS[0]
+    model: str = ""
+    # 上次从 DeepSeek 拉到的可用模型
+    models: list[str] = []
 
-    @field_validator("model")
+    @property
+    def ready(self) -> bool:
+        """Key 和模型都已配置。"""
+        return bool(self.api_key and self.model)
+
+    @field_validator("models", mode="before")
     @classmethod
-    def _known_model(cls, value: str) -> str:
-        """不在可选列表里的模型名（如旧版本存的）回落到默认模型。"""
-        return value if value in cls.MODELS else cls.MODELS[0]
+    def _parse_models(cls, value: Any) -> Any:
+        """设置表里存的是 JSON 字符串。"""
+        return json.loads(value or "[]") if isinstance(value, str) else value
+
     @classmethod
     def load(cls) -> LlmSettings:
         keys = tuple(f"{cls.PREFIX}{f}" for f in cls.model_fields)
@@ -59,5 +68,13 @@ class LlmSettings(BaseModel):
         return cls(**{k.removeprefix(cls.PREFIX): v for k, v in stored.items()})
 
     def save(self) -> None:
-        data = self.model_dump()
-        SettingRow.put_many({f"{self.PREFIX}{k}": v for k, v in data.items()})
+        data = {
+            f"{self.PREFIX}{k}": v if isinstance(v, str) else json.dumps(v)
+            for k, v in self.model_dump().items()
+        }
+        SettingRow.put_many(data)
+
+    async def fetch_models(self) -> list[str]:
+        """用当前 API Key 拉取 DeepSeek 可用模型；失败时抛 ``openai.APIError``。"""
+        client = DeepSeekProvider(api_key=self.api_key).client
+        return sorted([m.id async for m in client.models.list()])

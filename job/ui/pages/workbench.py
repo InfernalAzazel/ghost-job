@@ -168,6 +168,48 @@ class WorkbenchPage:
             box_shadow="0 1px 2px rgba(16,24,40,0.04)",
         )
 
+    @staticmethod
+    def _log_row(entry: rx.Var) -> rx.Component:
+        """一条日志：时间 · 级别图标 · 内容；入库绿色、跳过灰色、异常橙色。"""
+        level = entry["level"]
+        icon = rx.match(
+            level,
+            ("ok", rx.icon("circle-check", size=14, color="#12b76a")),
+            ("skip", rx.icon("circle-minus", size=14, color="#98a2b3")),
+            ("warn", rx.icon("triangle-alert", size=14, color="#f79009")),
+            rx.icon("info", size=14, color=ACCENT),
+        )
+        tag = rx.match(
+            level,
+            ("ok", rx.badge("入库", color_scheme="green", variant="soft", size="1")),
+            ("skip", rx.badge("跳过", color_scheme="gray", variant="soft", size="1")),
+            ("warn", rx.badge("注意", color_scheme="orange", variant="soft", size="1")),
+            rx.fragment(),
+        )
+        return rx.hstack(
+            rx.text(
+                entry["time"],
+                font_size="0.75em",
+                color="#98a2b3",
+                font_family="monospace",
+                flex_shrink="0",
+                padding_top="1px",
+            ),
+            rx.box(icon, display="flex", padding_top="2px", flex_shrink="0"),
+            tag,
+            rx.text(
+                entry["text"],
+                font_size="0.85em",
+                color=rx.cond(level == "skip", MUTED, TEXT),
+                word_break="break-all",
+            ),
+            align="start",
+            spacing="2",
+            width="100%",
+            padding="0.35em 0",
+            border_bottom=f"1px dashed {BORDER}",
+        )
+
     @classmethod
     def _log_panel(cls) -> rx.Component:
         return rx.box(
@@ -183,7 +225,14 @@ class WorkbenchPage:
                     align="start",
                 ),
                 rx.spacer(),
-                rx.badge("LOG", color_scheme="blue", variant="soft"),
+                rx.button(
+                    rx.icon("trash-2", size=14),
+                    "清空",
+                    variant="ghost",
+                    size="1",
+                    color_scheme="gray",
+                    on_click=BossState.clear_log,
+                ),
                 width="100%",
                 align="center",
                 flex_shrink="0",
@@ -207,12 +256,7 @@ class WorkbenchPage:
                     width="100%",
                 ),
                 rx.box(
-                    rx.foreach(
-                        BossState.log,
-                        lambda line: rx.text(
-                            line, font_size="0.8em", color=MUTED, font_family="monospace"
-                        ),
-                    ),
+                    rx.foreach(BossState.log, lambda entry: cls._log_row(entry)),
                     overflow_y="auto",
                     margin_top="0.5em",
                     width="100%",

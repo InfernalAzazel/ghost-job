@@ -25,7 +25,10 @@ from pydantic import (
 
 from job.boss.filters import BASE_URL, KeywordFilter, PaceProfile
 from job.models.job import JobRow
-from job.utils import as_dict, log
+from job.utils import as_dict
+
+# 日志回调：(级别 info / ok / skip / warn, 内容)
+LogSink = Callable[[str, str], Awaitable[None]]
 
 if TYPE_CHECKING:
     from patchright.async_api import Locator, Page, Response
@@ -146,6 +149,7 @@ class JobScraper:
         self._reviewer: JobReviewer | None = None
         self._saved = 0
         self._day_factor = 1.0
+        self._on_log: LogSink | None = None
 
     def request_stop(self) -> None:
         """请求停止当前抓取。"""
@@ -159,10 +163,12 @@ class JobScraper:
         keywords: KeywordFilter | None = None,
         reviewer: JobReviewer | None = None,
         on_job: Callable[[Job], Awaitable[None]] | None = None,
+        on_log: LogSink | None = None,
     ) -> tuple[str, list[Job], str]:
         """按节奏 ``pace`` 抓取搜索页，``keywords`` 不符合的卡片跳过不点开。
 
         传了 ``reviewer`` 时，点开详情后再做一次 AI 复核，不通过的不入库。
+        过程日志交给 ``on_log``（不打印到终端）。
         返回 (最终 URL, 职位列表, 状态)；状态为 done / stopped / need_login。
         """
         self._stop.clear()
@@ -170,9 +176,10 @@ class JobScraper:
         self._pace = pace or PaceProfile()
         self._keywords = keywords or KeywordFilter()
         self._reviewer = reviewer
+        self._on_log = on_log
         self._saved = 0
         self._day_factor = PaceProfile.daily_factor(str(self.session.user_data_dir))
-        log(f"今日节奏系数 ×{self._day_factor:.2f}")
+        await self._log(f"今日节奏系数 ×{self._day_factor:.2f}")
         page = await self.session.page()
 
         page.on("response", self._on_list_response)
@@ -217,18 +224,19 @@ class JobScraper:
                 continue
             done.add(job.job_id)
             if reason := self._keywords.reject_reason(job.title, job.company):
-                log(f"跳过 {job.title} · {job.company}：{reason}")
+                await self._log(f"{job.title} · {job.company}（{reason}）", "skip")
                 continue
 
             job = await self._open_detail(page, card, job)
             if self._reviewer and (reason := await self._reviewer.reject_reason(job)):
-                log(f"跳过 {job.title} · {job.company}：{reason}")
+                await self._log(f"{job.title} · {job.company}（{reason}）", "skip")
                 await self._pause(self._pace.read)
                 continue
             JobRow.upsert_from(job)
             batch.append(job)
             self._saved += 1
-            log(f"✓ {job.title} · {job.company} · {job.salary or '薪资未知'}")
+            salary = job.salary or "薪资未知"
+            await self._log(f"{job.title} · {job.company} · {salary}", "ok")
             if on_job is not None:
                 await on_job(job)
             await self._rest_after(self._saved)
@@ -239,8 +247,13 @@ class JobScraper:
         await self._pause(self._pace.read)
         every = self._pace.rest_every
         if every and count % every == 0:
-            log(f"已抓 {count} 条，歇一会")
+            await self._log(f"已入库 {count} 条，休息一会")
             await self._pause(self._pace.rest)
+
+    async def _log(self, text: str, level: str = "info") -> None:
+        """把一条过程日志交给 ``on_log``；没传回调就丢弃。"""
+        if self._on_log is not None:
+            await self._on_log(level, text)
 
     async def _pause(self, span: tuple[float, float]) -> None:
         """随机停顿（乘以今日节奏系数）；期间请求停止会立即返回。"""
@@ -263,7 +276,7 @@ class JobScraper:
                 await card.click(timeout=5_000)
             payload = await (await resp.value).json()
         except (PlaywrightError, ValueError) as exc:
-            log(f"{job.title} 详情获取失败: {exc}")
+            await self._log(f"{job.title} 详情获取失败：{exc}", "warn")
             return job
         return job.with_detail(as_dict(payload))
 
@@ -287,7 +300,7 @@ class JobScraper:
             try:
                 job = Job.model_validate(item)
             except ValidationError as exc:
-                log(f"列表数据解析失败: {exc}")
+                await self._log(f"列表数据解析失败：{exc}", "warn")
                 continue
             if job.job_id:
                 self._listed.setdefault(job.job_id, job)

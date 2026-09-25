@@ -10,6 +10,7 @@ from job.boss.filters import (
     Education,
     Experience,
     Funding,
+    Industry,
     JobType,
     Pace,
     PaceProfile,
@@ -47,6 +48,11 @@ class PlansState(rx.State):
     ai_requirement: str = ""
     # 配置中心左侧当前菜单：plan / llm
     section: str = "plan"
+    # 当前展开的下拉多选字段与搜索词
+    combo_open: str = ""
+    combo_query: str = ""
+    # 行业级联：左栏当前大类
+    industry_group: str = next(iter(Industry.groups))
     save_hint: str = "配置已自动保存"
     manager_open: bool = False
     rename_draft: str = ""
@@ -60,6 +66,30 @@ class PlansState(rx.State):
     funding_options: list[str] = Funding.labels(skip_unlimited=True)
     scale_options: list[str] = Scale.labels(skip_unlimited=True)
     pace_options: list[str] = Pace.labels()
+    industry_groups: list[str] = list(Industry.groups)
+
+    @rx.var
+    def industry_group_items(self) -> list[str]:
+        """行业级联右栏：当前大类下的行业。"""
+        return list(Industry.groups.get(self.industry_group, {}))
+
+    @rx.var
+    def industry_group_marks(self) -> dict[str, str]:
+        """各大类勾选状态：all 全选 / some 部分 / none 未选。"""
+        chosen = set(self.industry)
+        marks = {}
+        for group, names in Industry.groups.items():
+            hit = len(chosen & names.keys())
+            marks[group] = "all" if hit == len(names) else "some" if hit else "none"
+        return marks
+
+    @rx.var
+    def industry_matches(self) -> list[str]:
+        """行业搜索结果（输入搜索词时替代级联面板）。"""
+        query = self.combo_query.strip().lower()
+        if not query:
+            return []
+        return [name for name in Industry.options if query in name.lower()]
 
     @rx.var
     def pace_custom(self) -> bool:
@@ -280,55 +310,46 @@ class PlansState(rx.State):
         self._persist_filters()
 
     @rx.event
-    def toggle_experience(self, label: str):
-        if label in self.experience:
-            self.experience = [x for x in self.experience if x != label]
+    def open_combo(self, field: str):
+        """展开某个下拉多选，清空搜索词。"""
+        self.combo_open = field
+        self.combo_query = ""
+
+    @rx.event
+    def close_combo(self):
+        self.combo_open = ""
+        self.combo_query = ""
+
+    @rx.event
+    def set_combo_query(self, value: str):
+        self.combo_query = value
+
+    @rx.event
+    def set_industry_group(self, group: str):
+        self.industry_group = group
+
+    @rx.event
+    def toggle_industry_group(self, group: str):
+        """勾大类：已全选则全部取消，否则补齐该大类下所有行业。"""
+        names = list(Industry.groups.get(group, {}))
+        missing = [n for n in names if n not in self.industry]
+        if missing:
+            self.industry = [*self.industry, *missing]
         else:
-            self.experience = [*self.experience, label]
+            self.industry = [x for x in self.industry if x not in names]
+        self.industry_group = group
         self._persist_filters()
 
     @rx.event
-    def toggle_education(self, label: str):
-        if label in self.education:
-            self.education = [x for x in self.education if x != label]
+    def toggle_item(self, field: str, value: str):
+        """下拉多选点一项：未选则加上，已选则去掉。"""
+        if field not in LIST_FIELDS:
+            return
+        items = getattr(self, field)
+        if value in items:
+            setattr(self, field, [x for x in items if x != value])
         else:
-            self.education = [*self.education, label]
-        self._persist_filters()
-
-    @rx.event
-    def toggle_funding(self, label: str):
-        if label in self.funding:
-            self.funding = [x for x in self.funding if x != label]
-        else:
-            self.funding = [*self.funding, label]
-        self._persist_filters()
-
-    @rx.event
-    def toggle_scale(self, label: str):
-        if label in self.scale:
-            self.scale = [x for x in self.scale if x != label]
-        else:
-            self.scale = [*self.scale, label]
-        self._persist_filters()
-
-    @rx.event
-    def remove_experience(self, label: str):
-        self.experience = [x for x in self.experience if x != label]
-        self._persist_filters()
-
-    @rx.event
-    def remove_education(self, label: str):
-        self.education = [x for x in self.education if x != label]
-        self._persist_filters()
-
-    @rx.event
-    def remove_funding(self, label: str):
-        self.funding = [x for x in self.funding if x != label]
-        self._persist_filters()
-
-    @rx.event
-    def remove_scale(self, label: str):
-        self.scale = [x for x in self.scale if x != label]
+            setattr(self, field, [*items, value])
         self._persist_filters()
 
     @rx.event

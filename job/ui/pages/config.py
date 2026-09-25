@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import reflex as rx
 
-from job.boss.filters import Industry
 from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
 from job.ui.state import LlmState, PlansState
@@ -15,6 +16,16 @@ class ConfigPage:
     """配置中心：左侧菜单（求职方案 / 大模型）+ 右侧内容。"""
 
     # 左侧菜单：(分组, [(section, 图标, 名称)])
+    # 标签框里的无边框输入框样式
+    BARE_INPUT = {
+        "border": "none",
+        "outline": "none",
+        "background": "transparent",
+        "flex": "1",
+        "min_width": "120px",
+        "font_size": "0.9em",
+    }
+
     MENU = (
         ("求职设置", (("plan", "layout-grid", "求职方案"),)),
         ("系统能力", (("llm", "cpu", "大模型"),)),
@@ -211,49 +222,6 @@ class ConfigPage:
             margin_bottom="0.35em",
         )
 
-    @classmethod
-    def _selected_chips(cls, selected: rx.Var, remove_event) -> rx.Component:
-        return rx.cond(
-            selected.length() > 0,
-            rx.hstack(
-                rx.foreach(
-                    selected,
-                    lambda label: rx.hstack(
-                        rx.text(label, font_size="0.75em", color=ACCENT),
-                        rx.box(
-                            rx.icon("x", size=12, color=ACCENT),
-                            on_click=remove_event(label),
-                            cursor="pointer",
-                        ),
-                        spacing="1",
-                        align="center",
-                        bg=ACCENT_SOFT,
-                        border_radius="6px",
-                        padding="0.25em 0.5em",
-                    ),
-                ),
-                spacing="2",
-                flex_wrap="wrap",
-                margin_bottom="0.5em",
-            ),
-        )
-
-    @classmethod
-    def _option_buttons(cls, options: rx.Var, toggle_event) -> rx.Component:
-        return rx.hstack(
-            rx.foreach(
-                options,
-                lambda label: rx.button(
-                    label,
-                    size="1",
-                    variant="soft",
-                    on_click=toggle_event(label),
-                ),
-            ),
-            spacing="2",
-            flex_wrap="wrap",
-        )
-
     @staticmethod
     def _section(title: str, *children: rx.Component, hint: str = "") -> rx.Component:
         """配置分块卡片：标题（可带一行小字说明）+ 内容。"""
@@ -355,51 +323,102 @@ class ConfigPage:
 
     @classmethod
     def _multi_fields(cls) -> rx.Component:
-        """经验、学历、融资阶段、公司规模四个多选。"""
+        """经验、学历、融资阶段、公司规模四个下拉多选。"""
         return rx.grid(
-            cls._multi_field(
-                "工作经验要求（多选）",
-                PlansState.experience,
-                PlansState.experience_options,
-                PlansState.toggle_experience,
-                PlansState.remove_experience,
-            ),
-            cls._multi_field(
-                "最低学历（多选）",
-                PlansState.education,
-                PlansState.education_options,
-                PlansState.toggle_education,
-                PlansState.remove_education,
-            ),
-            cls._multi_field(
-                "融资阶段（多选）",
-                PlansState.funding,
-                PlansState.funding_options,
-                PlansState.toggle_funding,
-                PlansState.remove_funding,
-            ),
-            cls._multi_field(
-                "企业规模（多选）",
-                PlansState.scale,
-                PlansState.scale_options,
-                PlansState.toggle_scale,
-                PlansState.remove_scale,
-            ),
+            cls._combo_field("工作经验要求（多选）", "experience", "选择经验要求"),
+            cls._combo_field("最低学历（多选）", "education", "选择学历"),
+            cls._combo_field("融资阶段（多选）", "funding", "选择融资阶段"),
+            cls._combo_field("企业规模（多选）", "scale", "选择企业规模"),
             columns="2",
             spacing="4",
             width="100%",
         )
 
     @classmethod
-    def _multi_field(
-        cls, title: str, selected, options, toggle_event, remove_event
+    def _combo_field(
+        cls, title: str, field: str, placeholder: str, menu: rx.Component | None = None
     ) -> rx.Component:
-        """带标题的多选：已选标签 + 选项按钮。"""
+        """下拉多选：框内是已选标签和搜索框，聚焦后弹出 ``menu``（默认为选项列表）。"""
+        is_open = PlansState.combo_open == field
+        selected = getattr(PlansState, field)
         return rx.box(
             cls._field_label(title),
-            cls._selected_chips(selected, remove_event),
-            cls._option_buttons(options, toggle_event),
+            rx.box(
+                cls._tag_box(
+                    field,
+                    rx.el.input(
+                        value=rx.cond(is_open, PlansState.combo_query, ""),
+                        placeholder=rx.cond(selected.length() > 0, "", placeholder),
+                        on_focus=lambda _: PlansState.open_combo(field),
+                        on_blur=lambda _: PlansState.close_combo(),
+                        on_change=PlansState.set_combo_query,
+                        auto_complete="off",
+                        style=cls.BARE_INPUT,
+                    ),
+                    rx.icon(
+                        rx.cond(is_open, "search", "chevron-down"),
+                        size=16,
+                        color=MUTED,
+                        margin_left="auto",
+                    ),
+                    border_color=rx.cond(is_open, ACCENT, BORDER),
+                ),
+                rx.cond(is_open, menu if menu is not None else cls._combo_menu(field)),
+                position="relative",
+                width="100%",
+            ),
             width="100%",
+        )
+
+    @classmethod
+    def _combo_menu(cls, field: str) -> rx.Component:
+        """下拉选项列表：按搜索词过滤，已选项打勾；按下即切换。"""
+        selected = getattr(PlansState, field)
+        return cls._popup(
+            rx.foreach(
+                getattr(PlansState, f"{field}_options"),
+                lambda label: rx.cond(
+                    label.contains(PlansState.combo_query),
+                    rx.hstack(
+                        rx.text(label, font_size="0.9em"),
+                        rx.cond(
+                            selected.contains(label),
+                            rx.icon("check", size=14, color=ACCENT, margin_left="auto"),
+                        ),
+                        align="center",
+                        width="100%",
+                        padding="0.5em 0.75em",
+                        border_radius="8px",
+                        cursor="pointer",
+                        color=rx.cond(selected.contains(label), ACCENT, TEXT),
+                        _hover={"bg": "#f2f4f7"},
+                        on_mouse_down=PlansState.toggle_item(field, label),
+                    ),
+                ),
+            ),
+            max_height="260px",
+            overflow_y="auto",
+        )
+
+    @staticmethod
+    def _popup(*children: rx.Component, **style: Any) -> rx.Component:
+        """输入框下方的浮层；按下时阻止默认行为，输入框不失焦、下拉不收起。"""
+        return rx.box(
+            *children,
+            on_mouse_down=rx.prevent_default,
+            **{
+                "position": "absolute",
+                "top": "calc(100% + 4px)",
+                "left": "0",
+                "right": "0",
+                "z_index": "20",
+                "padding": "4px",
+                "bg": CARD,
+                "border": f"1px solid {BORDER}",
+                "border_radius": "12px",
+                "box_shadow": "0 8px 24px rgba(16,24,40,0.12)",
+                **style,
+            },
         )
 
     @classmethod
@@ -472,7 +491,7 @@ class ConfigPage:
                 LlmState.key_ready,
                 rx.fragment(),
                 rx.hstack(
-                    rx.text("尚未配置 DeepSeek API Key，", color="#d92d20"),
+                    rx.text("尚未配置大模型 Key 与模型，", color="#d92d20"),
                     rx.link(
                         "前往「大模型」填写",
                         on_click=PlansState.set_section("llm"),
@@ -493,29 +512,121 @@ class ConfigPage:
 
     @classmethod
     def _industry_select(cls) -> rx.Component:
-        """行业多选：已选为标签，右侧下拉按大类分组挑选。"""
+        """行业多选：左栏大类（可整类勾选）、右栏行业；输入文字时改为搜索结果。"""
+        return cls._combo_field(
+            "行业选择（可多选）",
+            "industry",
+            "选择行业，或输入关键字搜索",
+            menu=cls._popup(
+                rx.cond(
+                    PlansState.combo_query != "",
+                    cls._industry_matches(),
+                    rx.hstack(
+                        cls._industry_groups(),
+                        cls._industry_leaves(),
+                        spacing="0",
+                        align="stretch",
+                    ),
+                ),
+                right="auto",
+                width="460px",
+                padding="0",
+            ),
+        )
+
+    @classmethod
+    def _industry_groups(cls) -> rx.Component:
+        """左栏：大类；悬停切换右栏，勾选框整类全选 / 取消。"""
         return rx.box(
-            cls._field_label("行业选择（可多选）"),
-            cls._tag_box(
-                "industry",
-                rx.select.root(
-                    rx.select.trigger(
-                        placeholder="选择行业", variant="ghost", margin_left="auto"
-                    ),
-                    rx.select.content(
-                        *[
-                            rx.select.group(
-                                rx.select.label(group),
-                                *[rx.select.item(name, value=name) for name in names],
-                            )
-                            for group, names in Industry.groups.items()
-                        ]
-                    ),
-                    value="",
-                    on_change=lambda value: PlansState.add_item("industry", value),
+            rx.foreach(
+                PlansState.industry_groups,
+                lambda group: cls._check_row(
+                    group,
+                    PlansState.industry_group_marks[group],
+                    on_check=PlansState.toggle_industry_group(group),
+                    active=PlansState.industry_group == group,
+                    on_mouse_enter=PlansState.set_industry_group(group),
+                    trailing=rx.icon("chevron-right", size=14, color=MUTED),
                 ),
             ),
+            width="210px",
+            padding="4px",
+            border_right=f"1px solid {BORDER}",
+            max_height="280px",
+            overflow_y="auto",
+        )
+
+    @classmethod
+    def _industry_leaves(cls) -> rx.Component:
+        """右栏：当前大类下的行业。"""
+        return rx.box(
+            rx.foreach(
+                PlansState.industry_group_items, lambda n: cls._industry_leaf(n)
+            ),
+            flex="1",
+            padding="4px",
+            max_height="280px",
+            overflow_y="auto",
+        )
+
+    @classmethod
+    def _industry_matches(cls) -> rx.Component:
+        """搜索结果：所有大类里名字含关键字的行业。"""
+        return rx.box(
+            rx.foreach(PlansState.industry_matches, lambda n: cls._industry_leaf(n)),
+            rx.cond(
+                PlansState.industry_matches.length() == 0,
+                rx.text(
+                    "没有匹配的行业", font_size="0.85em", color=MUTED, padding="0.75em"
+                ),
+            ),
+            padding="4px",
+            max_height="280px",
+            overflow_y="auto",
+        )
+
+    @classmethod
+    def _industry_leaf(cls, name: rx.Var) -> rx.Component:
+        mark = rx.cond(PlansState.industry.contains(name), "all", "none")
+        return cls._check_row(
+            name, mark, on_check=PlansState.toggle_item("industry", name)
+        )
+
+    @staticmethod
+    def _check_row(
+        label: rx.Var,
+        mark: rx.Var,
+        *,
+        on_check,
+        active: rx.Var | bool = False,
+        on_mouse_enter=None,
+        trailing: rx.Component | None = None,
+    ) -> rx.Component:
+        """带勾选框的一行；``mark`` 为 all / some / none（全选 / 部分 / 未选）。"""
+        box = rx.match(
+            mark,
+            ("all", rx.icon("square-check", size=16, color=ACCENT)),
+            ("some", rx.icon("square-minus", size=16, color=ACCENT)),
+            rx.icon("square", size=16, color="#98a2b3"),
+        )
+        # 有悬停切换的行（大类）只在勾选框上勾选，其余整行可点
+        split = on_mouse_enter is not None
+        check = {"on_mouse_down": on_check}
+        events = {"on_mouse_enter": on_mouse_enter} if split else check
+        return rx.hstack(
+            rx.box(box, display="flex", **(check if split else {})),
+            rx.text(label, font_size="0.9em", flex="1"),
+            trailing or rx.fragment(),
+            align="center",
+            spacing="2",
             width="100%",
+            padding="0.45em 0.6em",
+            border_radius="8px",
+            cursor="pointer",
+            color=rx.cond(active, ACCENT, TEXT),
+            bg=rx.cond(active, ACCENT_SOFT, "transparent"),
+            _hover={"bg": rx.cond(active, ACCENT_SOFT, "#f2f4f7")},
+            **events,
         )
 
     @classmethod
@@ -530,14 +641,7 @@ class ConfigPage:
                         name="tag",
                         placeholder=placeholder,
                         auto_complete="off",
-                        style={
-                            "border": "none",
-                            "outline": "none",
-                            "background": "transparent",
-                            "flex": "1",
-                            "min_width": "140px",
-                            "font_size": "0.9em",
-                        },
+                        style=cls.BARE_INPUT,
                     ),
                 ),
                 on_submit=lambda form: PlansState.add_item(
@@ -550,7 +654,7 @@ class ConfigPage:
         )
 
     @staticmethod
-    def _tag_box(field: str, *tail: rx.Component) -> rx.Component:
+    def _tag_box(field: str, *tail: rx.Component, **style: Any) -> rx.Component:
         """带边框的标签框：``field`` 已选项为可删除标签，后面接输入框或下拉。"""
         return rx.hstack(
             rx.foreach(
@@ -580,6 +684,7 @@ class ConfigPage:
             padding="4px 8px",
             border=f"1px solid {BORDER}",
             border_radius="8px",
+            **style,
         )
 
     @classmethod
@@ -664,46 +769,46 @@ class ConfigPage:
             ),
             cls._section(
                 "DeepSeek",
-                rx.grid(
+                rx.vstack(
                     rx.box(
-                        cls._field_label("API Key"),
+                        cls._field_label("1. API Key"),
                         rx.input(
                             value=LlmState.api_key,
                             on_change=LlmState.set_api_key.debounce(500),
                             type="password",
-                            placeholder="sk-...",
+                            placeholder="在 DeepSeek 开放平台创建后粘贴到这里，sk-...",
                             width="100%",
-                        ),
-                        rx.text(
-                            LlmState.key_hint,
-                            font_size="0.8em",
-                            color=MUTED,
-                            margin_top="0.35em",
                         ),
                         width="100%",
                     ),
-                    cls._select_field(
-                        "模型",
-                        LlmState.model_options,
-                        LlmState.model,
-                        LlmState.set_model,
+                    rx.box(
+                        cls._field_label("2. 模型"),
+                        rx.hstack(
+                            rx.select(
+                                LlmState.model_options,
+                                value=LlmState.model,
+                                on_change=LlmState.set_model,
+                                placeholder="先拉取最新模型",
+                                disabled=LlmState.model_options.length() == 0,
+                                width="100%",
+                            ),
+                            cls._llm_button(
+                                "refresh-cw", "拉取最新模型", LlmState.fetch_models
+                            ),
+                            spacing="2",
+                            width="100%",
+                        ),
+                        width="100%",
                     ),
-                    columns="2",
+                    rx.hstack(
+                        cls._llm_button("plug", "测试连接", LlmState.test_connection),
+                        rx.text(LlmState.hint, font_size="0.8em", color=MUTED),
+                        spacing="3",
+                        align="center",
+                    ),
                     spacing="4",
                     width="100%",
-                ),
-                rx.hstack(
-                    rx.button(
-                        rx.hstack(rx.icon("plug", size=16), rx.text("测试连接")),
-                        on_click=LlmState.test_connection,
-                        loading=LlmState.testing,
-                        variant="outline",
-                        size="2",
-                    ),
-                    rx.text(LlmState.test_hint, font_size="0.8em", color=MUTED),
-                    spacing="3",
-                    align="center",
-                    margin_top="1em",
+                    max_width="560px",
                 ),
                 hint="API Key 只保存在本机数据库；测试会用一个样例岗位真实调用一次",
             ),
@@ -711,6 +816,18 @@ class ConfigPage:
             spacing="4",
             align="start",
             overflow_y="auto",
+        )
+
+    @staticmethod
+    def _llm_button(icon: str, label: str, on_click) -> rx.Component:
+        """大模型页的操作按钮；请求进行中时统一禁用。"""
+        return rx.button(
+            rx.hstack(rx.icon(icon, size=16), rx.text(label), spacing="2"),
+            on_click=on_click,
+            disabled=LlmState.busy,
+            variant="outline",
+            size="2",
+            flex_shrink="0",
         )
 
     # --- plan manager dialog ---
