@@ -16,6 +16,8 @@ concurrency:
 env:
   REFLEX_TELEMETRY_ENABLED: "false"
   CARGO_TERM_COLOR: always
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
 
 jobs:
   build-stage:
