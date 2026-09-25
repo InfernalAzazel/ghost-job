@@ -124,7 +124,15 @@ class WorkbenchPage:
                     disabled=BossState.busy,
                     width="100%",
                     size="3",
-                    style={"background": ACCENT, "color": "white"},
+                    style={
+                        "background": ACCENT,
+                        "color": "white",
+                        "_disabled": {
+                            "background": "var(--gray-a3)",
+                            "color": "var(--gray-a8)",
+                            "cursor": "not-allowed",
+                        },
+                    },
                 ),
                 rx.hstack(
                     rx.button(

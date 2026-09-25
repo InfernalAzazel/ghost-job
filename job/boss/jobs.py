@@ -341,8 +341,8 @@ class JobScraper:
             async with page.expect_response(self._is_detail, timeout=8_000) as resp:
                 await card.click(timeout=5_000)
             payload = await (await resp.value).json()
-        except (PlaywrightError, ValueError) as exc:
-            await self._log(f"{job.title} 详情获取失败：{exc}", "warn")
+        except (PlaywrightError, ValueError):
+            await self._log(f"{job.title} 详情加载较慢，先按列表信息判断")
             return job
         return job.with_detail(as_dict(payload))
 

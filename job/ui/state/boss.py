@@ -139,6 +139,8 @@ class BossState(rx.State):
 
         async def on_log(level: str, text: str) -> None:
             async with self:
+                if self.boss_state == "准备中":
+                    self.boss_state = "投递中"
                 self._push_log(text, level)
 
         try:
