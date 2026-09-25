@@ -85,10 +85,13 @@ jobs:
         working-directory: tauri/src-tauri
         run: |
           uv run python - <<'EOF'
-          import json, os, pathlib
+          import json, os, pathlib, sys
           conf = pathlib.Path("tauri.conf.json")
           data = json.loads(conf.read_text())
           data["version"] = os.environ["APP_VERSION"]
+          # bundle_dmg.sh is flaky on hosted macOS runners; the DMG is built separately
+          if sys.platform == "darwin":
+              data.setdefault("bundle", {})["targets"] = ["app"]
           conf.write_text(json.dumps(data, indent=2) + "\n")
           EOF
           cargo tauri icon ../../assets/icon.png
@@ -101,6 +104,22 @@ jobs:
 
       - name: Build app bundle
         run: uv run reflex-desktop build --bundle --skip-export
+
+      - name: Create DMG
+        if: runner.os == 'macOS'
+        run: |
+          bundle=tauri/src-tauri/target/release/bundle
+          arch=$([[ "$(uname -m)" == arm64 ]] && echo aarch64 || echo x64)
+          dmg="$bundle/dmg/Ghost Job_${APP_VERSION}_${arch}.dmg"
+          mkdir -p "$bundle/dmg" dmg-staging
+          ditto "$bundle/macos/Ghost Job.app" "dmg-staging/Ghost Job.app"
+          ln -s /Applications dmg-staging/Applications
+          for i in 1 2 3 4 5; do
+            hdiutil create -volname "Ghost Job" -srcfolder dmg-staging -ov -format UDZO "$dmg" && break
+            echo "hdiutil failed (attempt $i), retrying..."
+            sleep 15
+          done
+          test -f "$dmg"
 
       - name: Collect installers
         run: |
