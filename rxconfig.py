@@ -16,6 +16,7 @@ config = rx.Config(
     app_name="job",
     app_module_import="job.ui.app",
     cors_allowed_origins=["*"],
+    show_built_with_reflex=False,
     plugins=[
         DesktopPlugin(
             # 发布包内置 Python 后端；`reflex-desktop dev` 会自动改用本地 dev 服务
