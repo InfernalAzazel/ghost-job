@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlparse
 
-from job.boss.filters import City, Defaults, Experience, Scale, SearchUrl
+from job.boss.filters import (
+    City,
+    Defaults,
+    Experience,
+    Industry,
+    KeywordFilter,
+    Scale,
+    SearchUrl,
+)
 
 
 def test_search_url_minimal():
@@ -53,3 +61,34 @@ def test_search_url_ignores_blank_multiselect_labels():
     )
     qs = parse_qs(urlparse(url).query)
     assert "experience" not in qs
+
+
+def test_search_url_industry_codes():
+    url = SearchUrl.build({"query": "ai", "industry": ["互联网", "人工智能", "未知"]})
+    qs = parse_qs(urlparse(url).query)
+    assert qs["industry"] == [
+        f"{Industry.code('互联网')},{Industry.code('人工智能')}"
+    ]
+    assert Industry.code("互联网") == "100020"
+
+
+def test_keyword_filter_rules():
+    kw = KeywordFilter(
+        include=["agent", "AI"],
+        exclude=["实习"],
+        include_companies=[],
+        exclude_companies=["外包"],
+    )
+    assert kw.reject_reason("AI Agent 工程师", "某科技") == ""
+    assert kw.reject_reason("Java 开发", "某科技") == "职位名不含包含词"
+    assert kw.reject_reason("AI 实习生", "某科技") == "职位名含排除词"
+    assert kw.reject_reason("ai 工程师", "某外包公司") == "公司名含排除词"
+    assert KeywordFilter().reject_reason("任意", "任意") == ""
+
+
+def test_keyword_filter_from_plan():
+    plan = {"include_keywords": ["agent"], "exclude_companies": ["外包"]}
+    kw = KeywordFilter.from_plan(plan)
+    assert kw.include == ["agent"]
+    assert kw.exclude_companies == ["外包"]
+    assert kw.exclude == []

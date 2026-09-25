@@ -43,6 +43,34 @@ def _dumps_list(values: list[str] | None) -> str:
     return json.dumps(list(values or []), ensure_ascii=False)
 
 
+# 多选字段名；库里各存为 ``<字段>_json``（JSON 标签列表）
+LIST_FIELDS = (
+    "experience",
+    "education",
+    "funding",
+    "scale",
+    "industry",
+    "include_keywords",
+    "exclude_keywords",
+    "include_companies",
+    "exclude_companies",
+)
+
+
+def _list_columns() -> list[str]:
+    """多选字段对应的库列名。"""
+    return [f"{f}_json" for f in LIST_FIELDS]
+
+
+def _list_field(label: str) -> Any:
+    """多选字段列：默认空列表，老库补列时也填空列表。"""
+    return Field(
+        default="[]",
+        sa_column_kwargs={"server_default": "[]"},
+        description=f"{label}（JSON 标签列表）",
+    )
+
+
 class SearchPlanRow(SQLModel, table=True):
     """求职方案：筛选条件 + 当前/默认标记。"""
 
@@ -56,10 +84,15 @@ class SearchPlanRow(SQLModel, table=True):
     city_code: str = Field(default="", description="城市编码")
     job_type: str = Field(default="", description="求职类型编码")
     salary: str = Field(default="", description="薪资范围编码")
-    experience_json: str = Field(default="[]", description="经验要求（JSON 标签列表）")
-    education_json: str = Field(default="[]", description="学历要求（JSON 标签列表）")
-    funding_json: str = Field(default="[]", description="融资阶段（JSON 标签列表）")
-    scale_json: str = Field(default="[]", description="企业规模（JSON 标签列表）")
+    experience_json: str = _list_field("经验要求")
+    education_json: str = _list_field("学历要求")
+    funding_json: str = _list_field("融资阶段")
+    scale_json: str = _list_field("企业规模")
+    industry_json: str = _list_field("行业")
+    include_keywords_json: str = _list_field("职位名包含关键词")
+    exclude_keywords_json: str = _list_field("职位名排除关键词")
+    include_companies_json: str = _list_field("公司名包含关键词")
+    exclude_companies_json: str = _list_field("公司名排除关键词")
     pace: str = Field(
         default=Defaults.PACE,
         sa_column_kwargs={"server_default": Defaults.PACE},
@@ -69,6 +102,16 @@ class SearchPlanRow(SQLModel, table=True):
         default="{}",
         sa_column_kwargs={"server_default": "{}"},
         description="自定义速率明细参数（JSON 对象）",
+    )
+    ai_review: bool = Field(
+        default=False,
+        sa_column_kwargs={"server_default": "0"},
+        description="是否开启 AI 岗位意图复核",
+    )
+    ai_requirement: str = Field(
+        default="",
+        sa_column_kwargs={"server_default": ""},
+        description="AI 复核用的目标岗位要求",
     )
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
@@ -87,12 +130,11 @@ class SearchPlanRow(SQLModel, table=True):
             "city_code": self.city_code,
             "job_type": self.job_type,
             "salary": self.salary,
-            "experience": _loads_list(self.experience_json),
-            "education": _loads_list(self.education_json),
-            "funding": _loads_list(self.funding_json),
-            "scale": _loads_list(self.scale_json),
+            **{f: _loads_list(getattr(self, f"{f}_json")) for f in LIST_FIELDS},
             "pace": self.pace,
             "pace_params": _loads_dict(self.pace_json),
+            "ai_review": self.ai_review,
+            "ai_requirement": self.ai_requirement,
             "updated_at": self.updated_at.isoformat() if self.updated_at else "",
         }
 
@@ -122,10 +164,6 @@ class SearchPlanRow(SQLModel, table=True):
                 city_code=Defaults.CITY_CODE,
                 job_type=Defaults.JOB_TYPE,
                 salary=Defaults.SALARY,
-                experience_json="[]",
-                education_json="[]",
-                funding_json="[]",
-                scale_json="[]",
                 updated_at=datetime.now(UTC),
             )
             session.add(row)
@@ -171,15 +209,20 @@ class SearchPlanRow(SQLModel, table=True):
         city_code: str | None = None,
         job_type: str | None = None,
         salary: str | None = None,
-        experience: list[str] | None = None,
-        education: list[str] | None = None,
-        funding: list[str] | None = None,
-        scale: list[str] | None = None,
         pace: str | None = None,
         pace_params: dict[str, float] | None = None,
+        ai_review: bool | None = None,
+        ai_requirement: str | None = None,
         name: str | None = None,
+        **lists: list[str] | None,
     ) -> dict[str, Any]:
-        """更新筛选字段或名称；未传的参数保持原值。"""
+        """更新筛选字段或名称；未传的参数保持原值。
+
+        ``lists`` 为多选字段（见 ``LIST_FIELDS``），如 ``industry=["互联网"]``。
+        """
+        unknown = set(lists) - set(LIST_FIELDS)
+        if unknown:
+            raise TypeError(f"unknown plan fields: {sorted(unknown)}")
         with _session() as session:
             row = session.get(cls, plan_id)
             if row is None:
@@ -194,18 +237,17 @@ class SearchPlanRow(SQLModel, table=True):
                 row.job_type = job_type
             if salary is not None:
                 row.salary = salary
-            if experience is not None:
-                row.experience_json = _dumps_list(experience)
-            if education is not None:
-                row.education_json = _dumps_list(education)
-            if funding is not None:
-                row.funding_json = _dumps_list(funding)
-            if scale is not None:
-                row.scale_json = _dumps_list(scale)
+            for field, values in lists.items():
+                if values is not None:
+                    setattr(row, f"{field}_json", _dumps_list(values))
             if pace is not None:
                 row.pace = pace
             if pace_params is not None:
                 row.pace_json = json.dumps(pace_params)
+            if ai_review is not None:
+                row.ai_review = ai_review
+            if ai_requirement is not None:
+                row.ai_requirement = ai_requirement
             row.updated_at = datetime.now(UTC)
             session.add(row)
             session.commit()
@@ -250,13 +292,12 @@ class SearchPlanRow(SQLModel, table=True):
                 city_code=src.city_code if src else Defaults.CITY_CODE,
                 job_type=src.job_type if src else Defaults.JOB_TYPE,
                 salary=src.salary if src else Defaults.SALARY,
-                experience_json=src.experience_json if src else "[]",
-                education_json=src.education_json if src else "[]",
-                funding_json=src.funding_json if src else "[]",
-                scale_json=src.scale_json if src else "[]",
                 pace=src.pace if src else Defaults.PACE,
                 pace_json=src.pace_json if src else "{}",
+                ai_review=src.ai_review if src else False,
+                ai_requirement=src.ai_requirement if src else "",
                 updated_at=datetime.now(UTC),
+                **({c: getattr(src, c) for c in _list_columns()} if src else {}),
             )
             session.add(row)
             session.commit()

@@ -28,7 +28,7 @@ def get_engine():
     if _engine is not None:
         return _engine
 
-    for mod in ("job.models.job", "job.models.plan"):
+    for mod in ("job.models.job", "job.models.plan", "job.models.setting"):
         importlib.import_module(mod)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)

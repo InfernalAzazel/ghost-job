@@ -17,7 +17,7 @@ from job.boss.filters import (
     Scale,
 )
 from job.models import init_db
-from job.models.plan import SearchPlanRow
+from job.models.plan import LIST_FIELDS, SearchPlanRow
 
 
 class PlansState(rx.State):
@@ -34,10 +34,19 @@ class PlansState(rx.State):
     education: list[str] = rx.field(default_factory=list)
     funding: list[str] = rx.field(default_factory=list)
     scale: list[str] = rx.field(default_factory=list)
+    industry: list[str] = rx.field(default_factory=list)
+    include_keywords: list[str] = rx.field(default_factory=list)
+    exclude_keywords: list[str] = rx.field(default_factory=list)
+    include_companies: list[str] = rx.field(default_factory=list)
+    exclude_companies: list[str] = rx.field(default_factory=list)
     pace_label: str = Pace.default_label
     pace_params: dict[str, float] = rx.field(
         default_factory=lambda: PaceProfile().model_dump()
     )
+    ai_review: bool = False
+    ai_requirement: str = ""
+    # 配置中心左侧当前菜单：plan / llm
+    section: str = "plan"
     save_hint: str = "配置已自动保存"
     manager_open: bool = False
     rename_draft: str = ""
@@ -71,12 +80,12 @@ class PlansState(rx.State):
         self.city_label = City.label(str(plan.get("city_code") or ""))
         self.job_type_label = JobType.label(str(plan.get("job_type") or ""))
         self.salary_label = Salary.label(str(plan.get("salary") or ""))
-        self.experience = list(plan.get("experience") or [])
-        self.education = list(plan.get("education") or [])
-        self.funding = list(plan.get("funding") or [])
-        self.scale = list(plan.get("scale") or [])
+        for field in LIST_FIELDS:
+            setattr(self, field, list(plan.get(field) or []))
         self.pace_label = Pace.label(str(plan.get("pace") or ""))
         self.pace_params = PaceProfile.from_plan(plan).model_dump()
+        self.ai_review = bool(plan.get("ai_review"))
+        self.ai_requirement = str(plan.get("ai_requirement") or "")
         self.rename_draft = self.plan_name
         self.error = ""
 
@@ -96,12 +105,11 @@ class PlansState(rx.State):
             city_code=city_code,
             job_type=job_type,
             salary=salary,
-            experience=self.experience,
-            education=self.education,
-            funding=self.funding,
-            scale=self.scale,
             pace=Pace.code(self.pace_label),
             pace_params=self.pace_params,
+            ai_review=self.ai_review,
+            ai_requirement=self.ai_requirement,
+            **{field: getattr(self, field) for field in LIST_FIELDS},
         )
         self.save_hint = "配置已自动保存"
         self._refresh_plans()
@@ -258,6 +266,20 @@ class PlansState(rx.State):
         self._persist_filters()
 
     @rx.event
+    def set_section(self, value: str):
+        self.section = value
+
+    @rx.event
+    def set_ai_review(self, value: bool):
+        self.ai_review = value
+        self._persist_filters()
+
+    @rx.event
+    def set_ai_requirement(self, value: str):
+        self.ai_requirement = value
+        self._persist_filters()
+
+    @rx.event
     def toggle_experience(self, label: str):
         if label in self.experience:
             self.experience = [x for x in self.experience if x != label]
@@ -307,4 +329,22 @@ class PlansState(rx.State):
     @rx.event
     def remove_scale(self, label: str):
         self.scale = [x for x in self.scale if x != label]
+        self._persist_filters()
+
+    @rx.event
+    def add_item(self, field: str, value: str):
+        """多选字段加一项（去空白、去重），如行业、关键词。"""
+        value = str(value or "").strip()
+        items = getattr(self, field) if field in LIST_FIELDS else None
+        if items is None or not value or value in items:
+            return
+        setattr(self, field, [*items, value])
+        self._persist_filters()
+
+    @rx.event
+    def remove_item(self, field: str, value: str):
+        """多选字段删一项。"""
+        if field not in LIST_FIELDS:
+            return
+        setattr(self, field, [x for x in getattr(self, field) if x != value])
         self._persist_filters()

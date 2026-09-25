@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import date, timedelta
 
 from job.boss.filters import Pace, PaceProfile
 from job.boss.jobs import JobScraper
@@ -40,6 +41,16 @@ def test_from_plan_ignores_params_for_presets_and_bad_custom():
     )
     bad = {"pace": "custom", "pace_params": {"read_min": -1}}
     assert PaceProfile.from_plan(bad) == PaceProfile()
+
+
+def test_daily_factor_stable_within_day_and_varies_across_days():
+    day = date(2026, 9, 25)
+    factor = PaceProfile.daily_factor("profile-a", day)
+    assert 0.85 <= factor <= 1.2
+    assert PaceProfile.daily_factor("profile-a", day) == factor
+    week = {PaceProfile.daily_factor("profile-a", day + timedelta(d)) for d in range(7)}
+    assert len(week) > 1
+    assert PaceProfile.daily_factor("profile-b", day) != factor
 
 
 def test_reversed_min_max_still_forms_range():

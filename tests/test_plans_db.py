@@ -9,6 +9,7 @@ import pytest
 from job import models as models_pkg
 from job.models import init_db, reset_engine
 from job.models.plan import SearchPlanRow
+from job.models.setting import LlmSettings
 
 
 @pytest.fixture()
@@ -129,3 +130,42 @@ def test_old_db_gets_pace_column(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         assert SearchPlanRow.get_active_dict()["pace"] == "normal"
     finally:
         reset_engine()
+
+
+def test_industry_and_keywords_persist_and_copy(tmp_db: Path):
+    active = SearchPlanRow.get_active_dict()
+    assert active["industry"] == [] and active["exclude_companies"] == []
+    SearchPlanRow.update_filters(
+        active["id"], industry=["互联网"], include_keywords=["agent"]
+    )
+    refreshed = SearchPlanRow.get_active_dict()
+    assert refreshed["industry"] == ["互联网"]
+    assert refreshed["include_keywords"] == ["agent"]
+    copied = SearchPlanRow.create("复制行业")
+    assert copied["industry"] == ["互联网"]
+
+
+def test_ai_review_persist_and_copy(tmp_db: Path):
+    active = SearchPlanRow.get_active_dict()
+    assert active["ai_review"] is False and active["ai_requirement"] == ""
+    SearchPlanRow.update_filters(
+        active["id"], ai_review=True, ai_requirement="只投 Agent"
+    )
+    refreshed = SearchPlanRow.get_active_dict()
+    assert refreshed["ai_review"] is True
+    assert refreshed["ai_requirement"] == "只投 Agent"
+    copied = SearchPlanRow.create("复制复核")
+    assert copied["ai_review"] is True and copied["ai_requirement"] == "只投 Agent"
+
+
+def test_llm_settings_save_and_load(tmp_db: Path):
+    assert LlmSettings.load() == LlmSettings()
+    LlmSettings(api_key="sk-1", model="deepseek-v4-pro").save()
+    LlmSettings(api_key="sk-2", model="deepseek-v4-pro").save()
+    assert LlmSettings.load() == LlmSettings(api_key="sk-2", model="deepseek-v4-pro")
+
+
+def test_update_filters_rejects_unknown_list_field(tmp_db: Path):
+    active = SearchPlanRow.get_active_dict()
+    with pytest.raises(TypeError):
+        SearchPlanRow.update_filters(active["id"], bogus=["x"])

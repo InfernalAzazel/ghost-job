@@ -6,12 +6,14 @@ import reflex as rx
 from patchright.async_api import Error as PlaywrightError
 from sqlalchemy.exc import SQLAlchemyError
 
-from job.boss.filters import PaceProfile, SearchUrl
+from job.boss.filters import KeywordFilter, PaceProfile, SearchUrl
 from job.boss.jobs import JobScraper
+from job.boss.review import JobReviewer
 from job.boss.session import BossSession
 from job.models import DB_PATH, init_db
 from job.models.job import JobRow
 from job.models.plan import SearchPlanRow
+from job.models.setting import LlmSettings
 
 _session = BossSession()
 _scraper = JobScraper(_session)
@@ -85,6 +87,12 @@ class BossState(rx.State):
                 return
             url = SearchUrl.build(plan)
             pace = PaceProfile.from_plan(plan)
+            keywords = KeywordFilter.from_plan(plan)
+            reviewer = JobReviewer.from_plan(plan, LlmSettings.load())
+            if reviewer and not reviewer.llm.api_key:
+                self._push_log("已开启 AI 复核，请先在配置中心「大模型」填写 API Key")
+                self.boss_state = "need api key"
+                return
             self.busy = True
             self.boss_state = "navigating"
             self.session_count = 0
@@ -93,6 +101,8 @@ class BossState(rx.State):
                 f"→ search plan={self.active_plan_name} url={url}"
             )
             self._push_log(f"速率：{pace.describe()}")
+            if reviewer:
+                self._push_log("AI 岗位意图复核：已开启")
 
         async def on_job(_job) -> None:
             async with self:
@@ -102,7 +112,7 @@ class BossState(rx.State):
 
         try:
             final_url, _jobs, state = await _scraper.search(
-                url, pace=pace, on_job=on_job
+                url, pace=pace, keywords=keywords, reviewer=reviewer, on_job=on_job
             )
             async with self:
                 self.boss_state = state

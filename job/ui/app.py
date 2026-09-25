@@ -7,7 +7,7 @@ import reflex as rx
 from job.ui.pages.config import ConfigPage
 from job.ui.pages.jobs import JobsPage
 from job.ui.pages.workbench import WorkbenchPage
-from job.ui.state import BossState, JobsState, PlansState
+from job.ui.state import BossState, JobsState, LlmState, PlansState
 
 app = rx.App(
     style={
@@ -31,5 +31,5 @@ app.add_page(
     ConfigPage.create,
     route="/config",
     title="配置中心 · Ghost Job",
-    on_load=PlansState.on_load,
+    on_load=[PlansState.on_load, LlmState.on_load],
 )

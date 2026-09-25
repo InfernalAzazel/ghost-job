@@ -4,51 +4,138 @@ from __future__ import annotations
 
 import reflex as rx
 
+from job.boss.filters import Industry
 from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
-from job.ui.state import PlansState
+from job.ui.state import LlmState, PlansState
 from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
 
 
 class ConfigPage:
-    """配置中心：求职方案 + 岗位筛选。"""
+    """配置中心：左侧菜单（求职方案 / 大模型）+ 右侧内容。"""
+
+    # 左侧菜单：(分组, [(section, 图标, 名称)])
+    MENU = (
+        ("求职设置", (("plan", "layout-grid", "求职方案"),)),
+        ("系统能力", (("llm", "cpu", "大模型"),)),
+    )
 
     @classmethod
     def create(cls) -> rx.Component:
         return page_root(
             rx.box(site_header(active="config"), flex_shrink="0", width="100%"),
-            rx.box(
-                rx.box(cls._plan_header(), flex_shrink="0", width="100%"),
+            rx.hstack(
+                cls._sidebar(),
                 rx.box(
-                    cls._filters_form(),
-                    margin_top="1.25em",
-                    padding_top="1.25em",
-                    border_top=f"1px solid {BORDER}",
-                    width="100%",
+                    rx.cond(
+                        PlansState.section == "llm",
+                        cls._llm_panel(),
+                        cls._plan_panel(),
+                    ),
+                    bg=CARD,
+                    border=f"1px solid {BORDER}",
+                    border_radius="16px",
+                    padding="1.5em",
+                    box_shadow="0 1px 2px rgba(16,24,40,0.04)",
                     flex="1",
+                    min_width="0",
                     min_height="0",
                     display="flex",
                     flex_direction="column",
                     overflow="hidden",
                 ),
-                bg=CARD,
-                border=f"1px solid {BORDER}",
-                border_radius="16px",
-                padding="1.5em",
+                spacing="4",
+                align="stretch",
                 width="100%",
-                box_shadow="0 1px 2px rgba(16,24,40,0.04)",
+                flex="1",
+                min_height="0",
                 margin_top="0.5em",
+            ),
+            cls._plan_manager(),
+            max_width="1240px",
+        )
+
+    # --- sidebar ---
+
+    @classmethod
+    def _sidebar(cls) -> rx.Component:
+        """左侧：自动保存提示 + 分组菜单。"""
+        return rx.vstack(
+            rx.hstack(
+                rx.icon("circle-check", size=14, color=MUTED),
+                rx.text(PlansState.save_hint, font_size="0.8em", color=MUTED),
+                spacing="2",
+                align="center",
+                width="100%",
+                padding="0.5em 0.75em",
+                border=f"1px solid {BORDER}",
+                border_radius="10px",
+                bg=CARD,
+            ),
+            rx.vstack(
+                *[
+                    rx.fragment(
+                        rx.text(
+                            group,
+                            font_size="0.8em",
+                            color=MUTED,
+                            padding="0.5em 0.5em 0.25em",
+                        ),
+                        *[cls._menu_item(*item) for item in items],
+                    )
+                    for group, items in cls.MENU
+                ],
+                spacing="1",
+                width="100%",
+                padding="0.5em",
+                border=f"1px solid {BORDER}",
+                border_radius="12px",
+                bg=CARD,
+            ),
+            width="200px",
+            flex_shrink="0",
+            spacing="3",
+        )
+
+    @staticmethod
+    def _menu_item(section: str, icon: str, label: str) -> rx.Component:
+        """菜单项：当前项高亮。"""
+        active = PlansState.section == section
+        return rx.hstack(
+            rx.icon(icon, size=16),
+            rx.text(label, font_size="0.9em"),
+            spacing="3",
+            align="center",
+            width="100%",
+            padding="0.55em 0.85em",
+            border_radius="8px",
+            cursor="pointer",
+            color=rx.cond(active, ACCENT, TEXT),
+            bg=rx.cond(active, ACCENT_SOFT, "transparent"),
+            _hover={"bg": ACCENT_SOFT},
+            on_click=PlansState.set_section(section),
+        )
+
+    # --- plan panel ---
+
+    @classmethod
+    def _plan_panel(cls) -> rx.Component:
+        """求职方案：方案头 + 筛选卡片。"""
+        return rx.fragment(
+            rx.box(cls._plan_header(), flex_shrink="0", width="100%"),
+            rx.box(
+                cls._filters_form(),
+                margin_top="1.25em",
+                padding_top="1.25em",
+                border_top=f"1px solid {BORDER}",
+                width="100%",
                 flex="1",
                 min_height="0",
                 display="flex",
                 flex_direction="column",
                 overflow="hidden",
             ),
-            cls._plan_manager(),
-            max_width="1100px",
         )
-
-    # --- plan header ---
 
     @classmethod
     def _plan_header(cls) -> rx.Component:
@@ -73,7 +160,8 @@ class ConfigPage:
                         align="center",
                     ),
                     rx.text(
-                        "管理筛选条件；工作台抓取将使用当前方案。",
+                        "这张方案统一管理岗位筛选与 AI 复核，"
+                        "工作台抓取将使用当前方案。",
                         font_size="0.8em",
                         color=MUTED,
                         margin_top="0.35em",
@@ -105,16 +193,6 @@ class ConfigPage:
                 ),
                 width="100%",
                 align="start",
-            ),
-            rx.hstack(
-                rx.icon("circle-check", size=14, color=ACCENT),
-                rx.text(PlansState.save_hint, font_size="0.8em", color=ACCENT),
-                spacing="2",
-                bg=ACCENT_SOFT,
-                border_radius="8px",
-                padding="0.45em 0.75em",
-                margin_top="0.75em",
-                width="fit-content",
             ),
             width="100%",
             align="start",
@@ -176,141 +254,339 @@ class ConfigPage:
             flex_wrap="wrap",
         )
 
+    @staticmethod
+    def _section(title: str, *children: rx.Component, hint: str = "") -> rx.Component:
+        """配置分块卡片：标题（可带一行小字说明）+ 内容。"""
+        return rx.box(
+            rx.vstack(
+                rx.text(title, font_weight="700", color=TEXT),
+                rx.text(hint, font_size="0.8em", color=MUTED) if hint else rx.fragment(),
+                spacing="1",
+                margin_bottom="0.85em",
+            ),
+            *children,
+            width="100%",
+            padding="1.1em 1.25em",
+            border=f"1px solid {BORDER}",
+            border_radius="12px",
+            bg="#fcfcfd",
+        )
+
     @classmethod
     def _filters_form(cls) -> rx.Component:
+        """四张卡片：基础条件、多选条件、行业与关键词、拟人化。"""
         return rx.vstack(
-            rx.text(
-                "岗位筛选",
-                font_weight="700",
-                font_size="1em",
-                color=TEXT,
-                flex_shrink="0",
+            cls._section(
+                "基础条件",
+                cls._basic_fields(),
+                hint="搜什么岗位、在哪个城市找，会直接拼进 BOSS 搜索地址",
             ),
-            rx.box(
-                rx.box(
-                    rx.grid(
-                        rx.box(
-                            cls._field_label("岗位关键词"),
-                            rx.input(
-                                value=PlansState.query,
-                                on_change=PlansState.set_query.debounce(400),
-                                placeholder="例如：Agent 工程师",
-                                width="100%",
-                            ),
-                            width="100%",
-                        ),
-                        rx.box(
-                            cls._field_label("目标城市"),
-                            rx.select(
-                                PlansState.city_options,
-                                value=PlansState.city_label,
-                                on_change=PlansState.set_city,
-                                width="100%",
-                            ),
-                            width="100%",
-                        ),
-                        rx.box(
-                            cls._field_label("求职类型"),
-                            rx.select(
-                                PlansState.job_type_options,
-                                value=PlansState.job_type_label,
-                                on_change=PlansState.set_job_type,
-                                width="100%",
-                            ),
-                            width="100%",
-                        ),
-                        rx.box(
-                            cls._field_label("薪资范围"),
-                            rx.select(
-                                PlansState.salary_options,
-                                value=PlansState.salary_label,
-                                on_change=PlansState.set_salary,
-                                width="100%",
-                            ),
-                            width="100%",
-                        ),
-                        columns="2",
-                        spacing="4",
-                        width="100%",
-                    ),
-                    width="100%",
-                    margin_top="0.75em",
-                ),
-                rx.box(
-                    rx.grid(
-                        rx.box(
-                            cls._field_label("工作经验要求（多选）"),
-                            cls._selected_chips(
-                                PlansState.experience, PlansState.remove_experience
-                            ),
-                            cls._option_buttons(
-                                PlansState.experience_options,
-                                PlansState.toggle_experience,
-                            ),
-                            width="100%",
-                        ),
-                        rx.box(
-                            cls._field_label("最低学历（多选）"),
-                            cls._selected_chips(
-                                PlansState.education, PlansState.remove_education
-                            ),
-                            cls._option_buttons(
-                                PlansState.education_options,
-                                PlansState.toggle_education,
-                            ),
-                            width="100%",
-                        ),
-                        rx.box(
-                            cls._field_label("融资阶段（多选）"),
-                            cls._selected_chips(
-                                PlansState.funding, PlansState.remove_funding
-                            ),
-                            cls._option_buttons(
-                                PlansState.funding_options, PlansState.toggle_funding
-                            ),
-                            width="100%",
-                        ),
-                        rx.box(
-                            cls._field_label("企业规模（多选）"),
-                            cls._selected_chips(
-                                PlansState.scale, PlansState.remove_scale
-                            ),
-                            cls._option_buttons(
-                                PlansState.scale_options, PlansState.toggle_scale
-                            ),
-                            width="100%",
-                        ),
-                        columns="2",
-                        spacing="4",
-                        width="100%",
-                    ),
-                    width="100%",
-                    margin_top="1.25em",
-                    padding_top="1.25em",
-                    padding_bottom="1em",
-                    border_top=f"1px solid {BORDER}",
-                ),
+            cls._section(
+                "经验 / 学历 / 公司",
+                cls._multi_fields(),
+                hint="可多选，不选表示不限，由 BOSS 按条件筛选",
+            ),
+            cls._section(
+                "行业与关键词",
+                cls._keyword_section(),
+                hint="行业由 BOSS 筛选；关键词按职位名 / 公司名在本地过滤，不符合的不会点开",
+            ),
+            cls._section(
+                "拟人化",
                 cls._pace_section(),
-                width="100%",
-                flex="1",
-                min_height="0",
-                overflow_y="auto",
-                padding_right="0.35em",
+                hint="模拟真人的操作节奏，同一账号每天的表现也会略有差异",
             ),
             width="100%",
             height="100%",
             align="start",
-            spacing="2",
+            spacing="4",
             flex="1",
             min_height="0",
+            overflow_y="auto",
+            padding_right="0.35em",
+            padding_bottom="0.5em",
+        )
+
+    @classmethod
+    def _basic_fields(cls) -> rx.Component:
+        """岗位关键词、城市、求职类型、薪资。"""
+        return rx.grid(
+            rx.box(
+                cls._field_label("岗位关键词"),
+                rx.input(
+                    value=PlansState.query,
+                    on_change=PlansState.set_query.debounce(400),
+                    placeholder="例如：Agent 工程师",
+                    width="100%",
+                ),
+                width="100%",
+            ),
+            cls._select_field(
+                "目标城市",
+                PlansState.city_options,
+                PlansState.city_label,
+                PlansState.set_city,
+            ),
+            cls._select_field(
+                "求职类型",
+                PlansState.job_type_options,
+                PlansState.job_type_label,
+                PlansState.set_job_type,
+            ),
+            cls._select_field(
+                "薪资范围",
+                PlansState.salary_options,
+                PlansState.salary_label,
+                PlansState.set_salary,
+            ),
+            columns="2",
+            spacing="4",
+            width="100%",
+        )
+
+    @classmethod
+    def _select_field(cls, title: str, options, value, on_change) -> rx.Component:
+        """带标题的单选下拉。"""
+        return rx.box(
+            cls._field_label(title),
+            rx.select(options, value=value, on_change=on_change, width="100%"),
+            width="100%",
+        )
+
+    @classmethod
+    def _multi_fields(cls) -> rx.Component:
+        """经验、学历、融资阶段、公司规模四个多选。"""
+        return rx.grid(
+            cls._multi_field(
+                "工作经验要求（多选）",
+                PlansState.experience,
+                PlansState.experience_options,
+                PlansState.toggle_experience,
+                PlansState.remove_experience,
+            ),
+            cls._multi_field(
+                "最低学历（多选）",
+                PlansState.education,
+                PlansState.education_options,
+                PlansState.toggle_education,
+                PlansState.remove_education,
+            ),
+            cls._multi_field(
+                "融资阶段（多选）",
+                PlansState.funding,
+                PlansState.funding_options,
+                PlansState.toggle_funding,
+                PlansState.remove_funding,
+            ),
+            cls._multi_field(
+                "企业规模（多选）",
+                PlansState.scale,
+                PlansState.scale_options,
+                PlansState.toggle_scale,
+                PlansState.remove_scale,
+            ),
+            columns="2",
+            spacing="4",
+            width="100%",
+        )
+
+    @classmethod
+    def _multi_field(
+        cls, title: str, selected, options, toggle_event, remove_event
+    ) -> rx.Component:
+        """带标题的多选：已选标签 + 选项按钮。"""
+        return rx.box(
+            cls._field_label(title),
+            cls._selected_chips(selected, remove_event),
+            cls._option_buttons(options, toggle_event),
+            width="100%",
+        )
+
+    @classmethod
+    def _keyword_section(cls) -> rx.Component:
+        """行业多选 + 职位 / 公司的包含、排除关键词。"""
+        return rx.box(
+            cls._industry_select(),
+            rx.grid(
+                cls._tag_input("包含关键词", "include_keywords", "输入并回车添加包含词"),
+                cls._tag_input("排除关键词", "exclude_keywords", "输入并回车添加排除词"),
+                cls._tag_input(
+                    "包含公司关键词", "include_companies", "输入并回车添加公司包含词"
+                ),
+                cls._tag_input(
+                    "排除公司关键词", "exclude_companies", "输入并回车添加公司排除词"
+                ),
+                columns="2",
+                spacing="4",
+                width="100%",
+                margin_top="1em",
+            ),
+            cls._ai_review(),
+            width="100%",
+        )
+
+    @classmethod
+    def _ai_review(cls) -> rx.Component:
+        """AI 岗位意图复核：开关 + 目标岗位要求。"""
+        return rx.box(
+            rx.hstack(
+                rx.vstack(
+                    rx.text("AI 岗位意图复核", font_weight="600", color=TEXT),
+                    rx.text(
+                        "关键词过滤通过后，再由 DeepSeek 根据岗位职责复核一次；"
+                        "复核不通过或模型异常时跳过该岗位，不入库。",
+                        font_size="0.8em",
+                        color=MUTED,
+                    ),
+                    spacing="1",
+                ),
+                rx.switch(
+                    checked=PlansState.ai_review,
+                    on_change=PlansState.set_ai_review,
+                ),
+                justify="between",
+                align="start",
+                spacing="4",
+                width="100%",
+                margin_bottom="0.85em",
+            ),
+            cls._field_label("目标岗位要求"),
+            rx.text_area(
+                value=PlansState.ai_requirement,
+                on_change=PlansState.set_ai_requirement.debounce(500),
+                placeholder=(
+                    "例如：只投 AI 应用开发、AI Agent 工程师等岗位，"
+                    "以 Python、LLM、Agent、RAG 落地为核心。"
+                    "明确排除：销售、运营、纯算法研究、传统 CRUD、外包驻场。"
+                ),
+                rows="5",
+                width="100%",
+            ),
+            rx.text(
+                "建议同时写清希望投递和明确排除的岗位方向。",
+                font_size="0.8em",
+                color=MUTED,
+                margin_top="0.35em",
+            ),
+            rx.cond(
+                LlmState.key_ready,
+                rx.fragment(),
+                rx.hstack(
+                    rx.text("尚未配置 DeepSeek API Key，", color="#d92d20"),
+                    rx.link(
+                        "前往「大模型」填写",
+                        on_click=PlansState.set_section("llm"),
+                        cursor="pointer",
+                    ),
+                    spacing="0",
+                    font_size="0.8em",
+                    margin_top="0.25em",
+                ),
+            ),
+            width="100%",
+            margin_top="1em",
+            padding="0.9em 1em",
+            border=f"1px solid {BORDER}",
+            border_radius="10px",
+            bg=CARD,
+        )
+
+    @classmethod
+    def _industry_select(cls) -> rx.Component:
+        """行业多选：已选为标签，右侧下拉按大类分组挑选。"""
+        return rx.box(
+            cls._field_label("行业选择（可多选）"),
+            cls._tag_box(
+                "industry",
+                rx.select.root(
+                    rx.select.trigger(
+                        placeholder="选择行业", variant="ghost", margin_left="auto"
+                    ),
+                    rx.select.content(
+                        *[
+                            rx.select.group(
+                                rx.select.label(group),
+                                *[rx.select.item(name, value=name) for name in names],
+                            )
+                            for group, names in Industry.groups.items()
+                        ]
+                    ),
+                    value="",
+                    on_change=lambda value: PlansState.add_item("industry", value),
+                ),
+            ),
+            width="100%",
+        )
+
+    @classmethod
+    def _tag_input(cls, title: str, field: str, placeholder: str) -> rx.Component:
+        """关键词输入：回车添加为标签，点 × 删除。"""
+        return rx.box(
+            cls._field_label(title),
+            rx.form(
+                cls._tag_box(
+                    field,
+                    rx.el.input(
+                        name="tag",
+                        placeholder=placeholder,
+                        auto_complete="off",
+                        style={
+                            "border": "none",
+                            "outline": "none",
+                            "background": "transparent",
+                            "flex": "1",
+                            "min_width": "140px",
+                            "font_size": "0.9em",
+                        },
+                    ),
+                ),
+                on_submit=lambda form: PlansState.add_item(
+                    field, form.to(dict)["tag"]
+                ),
+                reset_on_submit=True,
+                width="100%",
+            ),
+            width="100%",
+        )
+
+    @staticmethod
+    def _tag_box(field: str, *tail: rx.Component) -> rx.Component:
+        """带边框的标签框：``field`` 已选项为可删除标签，后面接输入框或下拉。"""
+        return rx.hstack(
+            rx.foreach(
+                getattr(PlansState, field),
+                lambda label: rx.hstack(
+                    rx.text(label, font_size="0.8em", color=TEXT),
+                    rx.icon(
+                        "x",
+                        size=12,
+                        color=MUTED,
+                        cursor="pointer",
+                        on_click=PlansState.remove_item(field, label),
+                    ),
+                    spacing="1",
+                    align="center",
+                    bg="#f2f4f7",
+                    border_radius="4px",
+                    padding="0.15em 0.45em",
+                ),
+            ),
+            *tail,
+            spacing="1",
+            align="center",
+            flex_wrap="wrap",
+            width="100%",
+            min_height="36px",
+            padding="4px 8px",
+            border=f"1px solid {BORDER}",
+            border_radius="8px",
         )
 
     @classmethod
     def _pace_section(cls) -> rx.Component:
-        """抓取速率：预设档位 + 明细参数（仅「自定义」档可改）。"""
+        """拟人化节奏：预设档位 + 明细参数（仅「自定义」档可改）。"""
         num, unit = cls._pace_input, cls._pace_unit
         return rx.box(
-            cls._field_label("抓取速率"),
             rx.segmented_control.root(
                 rx.foreach(
                     PlansState.pace_options,
@@ -343,9 +619,6 @@ class ConfigPage:
                 margin_top="0.5em",
             ),
             width="100%",
-            padding_top="1.25em",
-            padding_bottom="1em",
-            border_top=f"1px solid {BORDER}",
         )
 
     @staticmethod
@@ -372,6 +645,72 @@ class ConfigPage:
             step=step,
             size="1",
             width="72px",
+        )
+
+    # --- llm panel ---
+
+    @classmethod
+    def _llm_panel(cls) -> rx.Component:
+        """大模型：DeepSeek API Key、模型与连接测试。"""
+        return rx.vstack(
+            rx.vstack(
+                rx.text("大模型", font_weight="700", font_size="1.1em", color=TEXT),
+                rx.text(
+                    "AI 岗位意图复核使用的模型，所有求职方案共用",
+                    font_size="0.8em",
+                    color=MUTED,
+                ),
+                spacing="1",
+            ),
+            cls._section(
+                "DeepSeek",
+                rx.grid(
+                    rx.box(
+                        cls._field_label("API Key"),
+                        rx.input(
+                            value=LlmState.api_key,
+                            on_change=LlmState.set_api_key.debounce(500),
+                            type="password",
+                            placeholder="sk-...",
+                            width="100%",
+                        ),
+                        rx.text(
+                            LlmState.key_hint,
+                            font_size="0.8em",
+                            color=MUTED,
+                            margin_top="0.35em",
+                        ),
+                        width="100%",
+                    ),
+                    cls._select_field(
+                        "模型",
+                        LlmState.model_options,
+                        LlmState.model,
+                        LlmState.set_model,
+                    ),
+                    columns="2",
+                    spacing="4",
+                    width="100%",
+                ),
+                rx.hstack(
+                    rx.button(
+                        rx.hstack(rx.icon("plug", size=16), rx.text("测试连接")),
+                        on_click=LlmState.test_connection,
+                        loading=LlmState.testing,
+                        variant="outline",
+                        size="2",
+                    ),
+                    rx.text(LlmState.test_hint, font_size="0.8em", color=MUTED),
+                    spacing="3",
+                    align="center",
+                    margin_top="1em",
+                ),
+                hint="API Key 只保存在本机数据库；测试会用一个样例岗位真实调用一次",
+            ),
+            width="100%",
+            spacing="4",
+            align="start",
+            overflow_y="auto",
         )
 
     # --- plan manager dialog ---

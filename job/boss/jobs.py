@@ -23,13 +23,14 @@ from pydantic import (
     model_validator,
 )
 
-from job.boss.filters import BASE_URL, PaceProfile
+from job.boss.filters import BASE_URL, KeywordFilter, PaceProfile
 from job.models.job import JobRow
 from job.utils import as_dict, log
 
 if TYPE_CHECKING:
     from patchright.async_api import Locator, Page, Response
 
+    from job.boss.review import JobReviewer
     from job.boss.session import BossSession
 
 DEFAULT_SEARCH_URL = (
@@ -141,6 +142,10 @@ class JobScraper:
         self._stop = asyncio.Event()
         self._listed: dict[str, Job] = {}
         self._pace = PaceProfile()
+        self._keywords = KeywordFilter()
+        self._reviewer: JobReviewer | None = None
+        self._saved = 0
+        self._day_factor = 1.0
 
     def request_stop(self) -> None:
         """请求停止当前抓取。"""
@@ -151,15 +156,23 @@ class JobScraper:
         url: str | None = None,
         *,
         pace: PaceProfile | None = None,
+        keywords: KeywordFilter | None = None,
+        reviewer: JobReviewer | None = None,
         on_job: Callable[[Job], Awaitable[None]] | None = None,
     ) -> tuple[str, list[Job], str]:
-        """按节奏 ``pace``（默认「正常」）抓取搜索页，返回 (最终 URL, 职位列表, 状态)。
+        """按节奏 ``pace`` 抓取搜索页，``keywords`` 不符合的卡片跳过不点开。
 
-        状态取值：``done`` / ``stopped`` / ``need_login``。
+        传了 ``reviewer`` 时，点开详情后再做一次 AI 复核，不通过的不入库。
+        返回 (最终 URL, 职位列表, 状态)；状态为 done / stopped / need_login。
         """
         self._stop.clear()
         self._listed.clear()
         self._pace = pace or PaceProfile()
+        self._keywords = keywords or KeywordFilter()
+        self._reviewer = reviewer
+        self._saved = 0
+        self._day_factor = PaceProfile.daily_factor(str(self.session.user_data_dir))
+        log(f"今日节奏系数 ×{self._day_factor:.2f}")
         page = await self.session.page()
 
         page.on("response", self._on_list_response)
@@ -175,9 +188,9 @@ class JobScraper:
             done: set[str] = set()
             idle = 0
             for _ in range(self.MAX_SCROLLS):
-                batch = await self._scrape_cards(page, done, on_job)
-                jobs += batch
-                idle = 0 if batch else idle + 1
+                seen = len(done)
+                jobs += await self._scrape_cards(page, done, on_job)
+                idle = 0 if len(done) > seen else idle + 1
                 if self._stop.is_set() or idle >= 2:
                     break
                 await self._load_more(page)
@@ -192,7 +205,7 @@ class JobScraper:
         done: set[str],
         on_job: Callable[[Job], Awaitable[None]] | None,
     ) -> list[Job]:
-        """逐个点击当前可见、未抓过的卡片，取详情并入库。"""
+        """逐个处理当前可见、未看过的卡片：不符合关键词就跳过，否则点开取详情并入库。"""
         cards = page.locator(self.CARD)
         batch: list[Job] = []
         for i in range(await cards.count()):
@@ -202,15 +215,23 @@ class JobScraper:
             job = await self._listed_job_for(card, i)
             if job is None or job.job_id in done:
                 continue
+            done.add(job.job_id)
+            if reason := self._keywords.reject_reason(job.title, job.company):
+                log(f"跳过 {job.title} · {job.company}：{reason}")
+                continue
 
             job = await self._open_detail(page, card, job)
+            if self._reviewer and (reason := await self._reviewer.reject_reason(job)):
+                log(f"跳过 {job.title} · {job.company}：{reason}")
+                await self._pause(self._pace.read)
+                continue
             JobRow.upsert_from(job)
-            done.add(job.job_id)
             batch.append(job)
+            self._saved += 1
             log(f"✓ {job.title} · {job.company} · {job.salary or '薪资未知'}")
             if on_job is not None:
                 await on_job(job)
-            await self._rest_after(len(done))
+            await self._rest_after(self._saved)
         return batch
 
     async def _rest_after(self, count: int) -> None:
@@ -222,9 +243,10 @@ class JobScraper:
             await self._pause(self._pace.rest)
 
     async def _pause(self, span: tuple[float, float]) -> None:
-        """随机停顿一段时间；期间请求停止会立即返回。"""
+        """随机停顿（乘以今日节奏系数）；期间请求停止会立即返回。"""
+        seconds = random.uniform(*span) * self._day_factor
         with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(self._stop.wait(), random.uniform(*span))
+            await asyncio.wait_for(self._stop.wait(), seconds)
 
     async def _listed_job_for(self, card: Locator, index: int) -> Job | None:
         """找卡片对应的列表职位：先按 data-jobid，找不到就按顺序对应。"""

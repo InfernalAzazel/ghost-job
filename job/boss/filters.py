@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Mapping, Sequence
+from datetime import date
 from typing import Any, ClassVar
 from urllib.parse import urlencode
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from job.boss.city_codes import CITY_OPTIONS
+from job.boss.industry_codes import INDUSTRY_GROUPS, INDUSTRY_OPTIONS
 
 BASE_URL = "https://www.zhipin.com"
 
@@ -144,6 +147,56 @@ class Scale(FilterField):
     }
 
 
+class Industry(FilterField):
+    """行业（``industry``，可多选）；选项见 ``industry_codes``。"""
+
+    # 大类 → {行业名: 行业编码}，给下拉分组用
+    groups: ClassVar[dict[str, dict[str, str]]] = INDUSTRY_GROUPS
+    options: ClassVar[dict[str, str]] = INDUSTRY_OPTIONS
+
+
+class KeywordFilter(BaseModel):
+    """本地关键词过滤（BOSS URL 不支持）：按列表数据判断，不符合的卡片不点开。"""
+
+    # 职位名需包含其中任一词（空表示不限）
+    include: list[str] = []
+    # 职位名包含其中任一词就跳过
+    exclude: list[str] = []
+    # 公司名需包含其中任一词（空表示不限）
+    include_companies: list[str] = []
+    # 公司名包含其中任一词就跳过
+    exclude_companies: list[str] = []
+
+    @classmethod
+    def from_plan(cls, plan: Mapping[str, Any]) -> KeywordFilter:
+        """从方案字典取四组关键词。"""
+        return cls(
+            include=plan.get("include_keywords") or [],
+            exclude=plan.get("exclude_keywords") or [],
+            include_companies=plan.get("include_companies") or [],
+            exclude_companies=plan.get("exclude_companies") or [],
+        )
+
+    def reject_reason(self, title: str, company: str) -> str:
+        """不符合时返回原因，符合返回空串（不区分大小写）。"""
+        checks = (
+            (title, self.include, True, "职位名不含包含词"),
+            (title, self.exclude, False, "职位名含排除词"),
+            (company, self.include_companies, True, "公司名不含包含词"),
+            (company, self.exclude_companies, False, "公司名含排除词"),
+        )
+        for text, words, must_hit, reason in checks:
+            if words and self._hit(text, words) != must_hit:
+                return reason
+        return ""
+
+    @staticmethod
+    def _hit(text: str, words: list[str]) -> bool:
+        """text 是否包含任一关键词。"""
+        lowered = text.lower()
+        return any(w.lower() in lowered for w in words)
+
+
 class Pace(FilterField):
     """抓取速率（不进 URL）：文案 → 节奏码，节奏细节见 ``PaceProfile``。"""
 
@@ -198,6 +251,12 @@ class PaceProfile(BaseModel):
     rest_min: float = Field(30, ge=0, le=600)
     # 歇一次最多多久
     rest_max: float = Field(60, ge=0, le=600)
+
+    @staticmethod
+    def daily_factor(account: str, day: date | None = None) -> float:
+        """按「账号 + 日期」算当天的节奏系数（0.85–1.2），同一天多次调用结果相同。"""
+        seed = f"{account}|{(day or date.today()).isoformat()}"
+        return random.Random(seed).uniform(0.85, 1.2)
 
     @classmethod
     def preset(cls, code: str) -> PaceProfile:
@@ -297,6 +356,7 @@ class SearchUrl:
             ("degree", Education, _list("education")),
             ("stage", Funding, _list("funding")),
             ("scale", Scale, _list("scale")),
+            ("industry", Industry, _list("industry")),
         ):
             codes = field.codes(values)
             if codes:
