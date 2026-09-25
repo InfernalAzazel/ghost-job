@@ -92,6 +92,11 @@ jobs:
           # bundle_dmg.sh is flaky on hosted macOS runners; the DMG is built separately
           if sys.platform == "darwin":
               data.setdefault("bundle", {})["targets"] = ["app"]
+          # The exe loads python312.dll at startup, so it must sit next to the exe
+          if sys.platform == "win32":
+              resources = data["bundle"]["resources"]
+              for dll in ("python312.dll", "python3.dll", "vcruntime140.dll", "vcruntime140_1.dll"):
+                  resources[f"python/python/{dll}"] = dll
           conf.write_text(json.dumps(data, indent=2) + "\n")
           EOF
           cargo tauri icon ../../assets/icon.png
