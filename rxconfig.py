@@ -1,5 +1,16 @@
+import sys
+from pathlib import Path
+
 import reflex as rx
 from reflex_desktop import DesktopPlugin
+
+# Windows GUI launches have no stdout/stderr (None), which crashes uvicorn's logging setup
+if sys.stdout is None or sys.stderr is None:
+    _log = Path.home() / ".ghost-job" / "logs" / "backend.log"
+    _log.parent.mkdir(parents=True, exist_ok=True)
+    _stream = _log.open("a", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stdout or _stream
+    sys.stderr = sys.stderr or _stream
 
 config = rx.Config(
     app_name="job",
