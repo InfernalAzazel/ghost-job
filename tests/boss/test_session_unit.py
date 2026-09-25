@@ -1,9 +1,11 @@
+"""BossSession 配置单元测试。"""
+
 from pathlib import Path
 
-from job.lib.boss.session import default_user_data_dir
+from job.boss.session import BossSession
 
 
-def test_default_user_data_dir_under_home(monkeypatch, tmp_path: Path):
+def test_default_profile_dir_under_home(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    d = default_user_data_dir()
+    d = BossSession.default_profile_dir()
     assert d == tmp_path / ".ghost-job" / "chrome-profile"

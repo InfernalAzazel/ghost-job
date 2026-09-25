@@ -1,0 +1,235 @@
+"""Workbench page."""
+
+from __future__ import annotations
+
+import reflex as rx
+
+from job.ui.components.header import site_header
+from job.ui.components.layout import page_root
+from job.ui.state import BossState
+from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
+
+
+class WorkbenchPage:
+    """工作台：抓取控制与运行日志。"""
+
+    @classmethod
+    def create(cls) -> rx.Component:
+        return page_root(
+            rx.box(site_header(active="workbench"), flex_shrink="0", width="100%"),
+            rx.hstack(
+                cls._stat_card("运行状态", BossState.boss_state, "当前会话", "rocket"),
+                cls._stat_card(
+                    "已入库岗位", BossState.stored_count, "本地 SQLite", "database"
+                ),
+                cls._stat_card("本次抓取", BossState.session_count, "当前任务", "list"),
+                spacing="3",
+                width="100%",
+                flex_wrap="wrap",
+                flex_shrink="0",
+            ),
+            rx.hstack(
+                cls._platform_panel(),
+                cls._log_panel(),
+                spacing="4",
+                width="100%",
+                align="stretch",
+                flex="1",
+                min_height="0",
+                margin_top="1em",
+                overflow="hidden",
+            ),
+            max_width="1100px",
+        )
+
+    @classmethod
+    def _stat_card(
+        cls, label: str, value: rx.Var | str, hint: str, icon: str
+    ) -> rx.Component:
+        return rx.box(
+            rx.hstack(
+                rx.box(
+                    rx.icon(icon, size=18, color=ACCENT),
+                    bg=ACCENT_SOFT,
+                    border_radius="10px",
+                    padding="0.55em",
+                ),
+                rx.spacer(),
+            ),
+            rx.text(
+                value, font_size="1.6em", font_weight="700", color=TEXT, margin_top="0.5em"
+            ),
+            rx.text(label, font_size="0.85em", color=TEXT, font_weight="600"),
+            rx.text(hint, font_size="0.75em", color=MUTED, margin_top="0.15em"),
+            bg=CARD,
+            border=f"1px solid {BORDER}",
+            border_radius="14px",
+            padding="1em 1.1em",
+            flex="1",
+            min_width="140px",
+            box_shadow="0 1px 2px rgba(16,24,40,0.04)",
+        )
+
+    @classmethod
+    def _platform_panel(cls) -> rx.Component:
+        status_hint = rx.cond(
+            BossState.busy,
+            "任务进行中…",
+            rx.cond(
+                BossState.boss_state == "ready",
+                "Chrome 已就绪，可以开始抓取",
+                "等待启动 Chrome / 抓取",
+            ),
+        )
+        return rx.box(
+            rx.heading("抓取控制", size="5", color=TEXT),
+            rx.text(
+                "使用本机 Chrome 打开 BOSS，抓取列表与详情并写入本地 SQLite。",
+                color=MUTED,
+                font_size="0.85em",
+                margin_top="0.35em",
+            ),
+            rx.cond(
+                BossState.active_plan_name != "",
+                rx.text(
+                    f"当前方案：{BossState.active_plan_name}",
+                    font_size="0.8em",
+                    color=ACCENT,
+                    margin_top="0.5em",
+                ),
+            ),
+            rx.box(
+                rx.vstack(
+                    rx.text("环境状态", font_weight="600", font_size="0.85em", color=TEXT),
+                    rx.text(BossState.boss_state, font_size="0.8em", color=MUTED),
+                    rx.text(status_hint, font_size="0.8em", color=MUTED),
+                    align="start",
+                    spacing="1",
+                    width="100%",
+                ),
+                bg="#F8FAFC",
+                border=f"1px solid {BORDER}",
+                border_radius="12px",
+                padding="1em",
+                margin_top="1em",
+                flex_shrink="0",
+            ),
+            rx.vstack(
+                rx.button(
+                    rx.hstack(rx.icon("monitor", size=16), rx.text("打开 BOSS"), spacing="2"),
+                    on_click=BossState.open_boss,
+                    disabled=BossState.busy,
+                    width="100%",
+                    size="3",
+                    variant="soft",
+                ),
+                rx.button(
+                    rx.hstack(
+                        rx.icon("search", size=16), rx.text("抓列表+详情"), spacing="2"
+                    ),
+                    on_click=BossState.start_search,
+                    disabled=BossState.busy,
+                    width="100%",
+                    size="3",
+                    style={"background": ACCENT, "color": "white"},
+                ),
+                rx.hstack(
+                    rx.button(
+                        "停止",
+                        on_click=BossState.stop_search,
+                        disabled=BossState.busy == False,  # noqa: E712
+                        color_scheme="red",
+                        variant="soft",
+                        flex="1",
+                    ),
+                    rx.button(
+                        "关闭 Chrome",
+                        on_click=BossState.close_boss,
+                        variant="outline",
+                        flex="1",
+                    ),
+                    width="100%",
+                    spacing="2",
+                ),
+                spacing="2",
+                width="100%",
+                margin_top="1.1em",
+                flex_shrink="0",
+            ),
+            bg=CARD,
+            border=f"1px solid {BORDER}",
+            border_radius="16px",
+            padding="1.25em",
+            flex="1",
+            min_width="280px",
+            min_height="0",
+            height="100%",
+            overflow_y="auto",
+            box_shadow="0 1px 2px rgba(16,24,40,0.04)",
+        )
+
+    @classmethod
+    def _log_panel(cls) -> rx.Component:
+        return rx.box(
+            rx.hstack(
+                rx.vstack(
+                    rx.text("运行日志", font_weight="700", color=TEXT),
+                    rx.text(
+                        f"本次抓取 {BossState.session_count} · 共 {BossState.log.length()} 条",
+                        font_size="0.75em",
+                        color=MUTED,
+                    ),
+                    spacing="0",
+                    align="start",
+                ),
+                rx.spacer(),
+                rx.badge("LOG", color_scheme="blue", variant="soft"),
+                width="100%",
+                align="center",
+                flex_shrink="0",
+            ),
+            rx.cond(
+                BossState.log.length() == 0,
+                rx.box(
+                    rx.hstack(
+                        rx.icon("info", size=16, color=ACCENT),
+                        rx.text(
+                            "暂无日志，开始抓取后会显示在这里",
+                            font_size="0.85em",
+                            color=ACCENT,
+                        ),
+                        spacing="2",
+                    ),
+                    bg=ACCENT_SOFT,
+                    border_radius="10px",
+                    padding="0.75em 1em",
+                    margin_top="1em",
+                    width="100%",
+                ),
+                rx.box(
+                    rx.foreach(
+                        BossState.log,
+                        lambda line: rx.text(
+                            line, font_size="0.8em", color=MUTED, font_family="monospace"
+                        ),
+                    ),
+                    overflow_y="auto",
+                    margin_top="0.5em",
+                    width="100%",
+                    flex="1",
+                    min_height="0",
+                ),
+            ),
+            bg=CARD,
+            border=f"1px solid {BORDER}",
+            border_radius="16px",
+            padding="1.25em",
+            flex="1.2",
+            min_width="320px",
+            min_height="0",
+            height="100%",
+            display="flex",
+            flex_direction="column",
+            overflow="hidden",
+            box_shadow="0 1px 2px rgba(16,24,40,0.04)",
+        )

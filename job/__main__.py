@@ -1,4 +1,4 @@
-"""Start Ghost Job via Reflex.
+"""Start Ghost Job in a native desktop window (reflex-desktop).
 
 Usage (from repo root)::
 
@@ -16,10 +16,9 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     os.chdir(root)
     # Reflex discovers rxconfig.py in the process cwd.
-    sys.argv = ["reflex", "run", *sys.argv[1:]]
-    from reflex.reflex import cli
+    from reflex_desktop.cli import main as desktop_main
 
-    cli()
+    desktop_main(["dev", *sys.argv[1:]], prog_name="reflex-desktop")
 
 
 if __name__ == "__main__":

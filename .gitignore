@@ -1,3 +1,5 @@
+.web
+.states
 *.db
 *.py[cod]
 assets/external/
@@ -5,6 +7,9 @@ assets/external/
 .superpowers/
 docs/
 .web/
+# reflex-desktop Tauri scaffolds (generated)
+tauri/
+tauri-dev/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

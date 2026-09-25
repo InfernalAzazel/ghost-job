@@ -1,0 +1,305 @@
+"""BOSS 直聘筛选选项与搜索 URL 拼装。"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any, ClassVar
+from urllib.parse import urlencode
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from job.boss.city_codes import CITY_OPTIONS
+
+BASE_URL = "https://www.zhipin.com"
+
+
+class FilterField:
+    """单项筛选：展示文案 → BOSS 参数码。"""
+
+    options: ClassVar[dict[str, str]] = {}
+    default_label: ClassVar[str] = "不限"
+
+    @classmethod
+    def code(cls, label: str) -> str:
+        """文案 → 参数码；未知文案返回空串。"""
+        return cls.options.get(label, "")
+
+    @classmethod
+    def label(cls, code: str) -> str:
+        """参数码 → 文案；未知码返回默认文案。"""
+        for text, value in cls.options.items():
+            if value == code:
+                return text
+        return cls.default_label
+
+    @classmethod
+    def codes(cls, labels: Sequence[str] | None) -> list[str]:
+        """多选文案 → 非空参数码列表（跳过「不限」等空码）。"""
+        if not labels:
+            return []
+        out: list[str] = []
+        for text in labels:
+            value = cls.code(text)
+            if value:
+                out.append(value)
+        return out
+
+    @classmethod
+    def labels(cls, *, skip_unlimited: bool = False) -> list[str]:
+        """全部展示文案；``skip_unlimited`` 时去掉「不限」。"""
+        if not skip_unlimited:
+            return list(cls.options)
+        return [k for k in cls.options if k != "不限"]
+
+
+class City(FilterField):
+    """工作城市（``city``）；选项见 ``city_codes.CITY_OPTIONS``。"""
+
+    default_label: ClassVar[str] = "广州"
+    options: ClassVar[dict[str, str]] = CITY_OPTIONS
+
+
+class JobType(FilterField):
+    """求职类型（``jobType``）。"""
+
+    options: ClassVar[dict[str, str]] = {
+        "不限": "",
+        "全职": "1901",
+        "兼职": "1903",
+    }
+
+
+class Salary(FilterField):
+    """薪资范围（``salary``）。"""
+
+    options: ClassVar[dict[str, str]] = {
+        "不限": "",
+        "3K以下": "402",
+        "3-5K": "403",
+        "5-10K": "404",
+        "10-20K": "405",
+        "20-50K": "406",
+        "50K以上": "407",
+    }
+
+
+class Experience(FilterField):
+    """工作经验（``experience``，可多选）。"""
+
+    options: ClassVar[dict[str, str]] = {
+        "不限": "",
+        "在校生": "108",
+        "应届生": "102",
+        "经验不限": "101",
+        "1年以内": "103",
+        "1-3年": "104",
+        "3-5年": "105",
+        "5-10年": "106",
+        "10年以上": "107",
+    }
+
+
+class Education(FilterField):
+    """学历要求（``degree``，可多选）。"""
+
+    options: ClassVar[dict[str, str]] = {
+        "不限": "",
+        "初中及以下": "209",
+        "中专/中技": "208",
+        "高中": "206",
+        "大专": "202",
+        "本科": "203",
+        "硕士": "204",
+        "博士": "205",
+    }
+
+
+class Funding(FilterField):
+    """融资阶段（``stage``，可多选）。"""
+
+    options: ClassVar[dict[str, str]] = {
+        "不限": "",
+        "未融资": "801",
+        "天使轮": "802",
+        "A轮": "803",
+        "B轮": "804",
+        "C轮": "805",
+        "D轮及以上": "806",
+        "已上市": "807",
+        "不需要融资": "808",
+    }
+
+
+class Scale(FilterField):
+    """公司规模（``scale``，可多选）。"""
+
+    options: ClassVar[dict[str, str]] = {
+        "不限": "",
+        "0-20人": "301",
+        "20-99人": "302",
+        "100-499人": "303",
+        "500-999人": "304",
+        "1000-9999人": "305",
+        "10000人以上": "306",
+    }
+
+
+class Pace(FilterField):
+    """抓取速率（不进 URL）：文案 → 节奏码，节奏细节见 ``PaceProfile``。"""
+
+    default_label: ClassVar[str] = "正常"
+    options: ClassVar[dict[str, str]] = {
+        "慢速": "slow",
+        "正常": "normal",
+        "快速": "fast",
+        "自定义": "custom",
+    }
+
+
+class PaceProfile(BaseModel):
+    """抓取节奏明细：各步骤之后的随机停顿（秒），默认值即「正常」。"""
+
+    model_config = ConfigDict(frozen=True)
+
+    # 自定义速率码：此时读方案里保存的明细参数
+    CUSTOM: ClassVar[str] = "custom"
+    # 预设速率码 → 与默认值不同的参数
+    PRESETS: ClassVar[dict[str, dict[str, float]]] = {
+        "slow": {
+            "read_min": 6,
+            "read_max": 15,
+            "scroll_min": 4,
+            "scroll_max": 8,
+            "rest_every": 10,
+            "rest_min": 60,
+            "rest_max": 120,
+        },
+        "normal": {},
+        "fast": {
+            "read_min": 1,
+            "read_max": 2.5,
+            "scroll_min": 1,
+            "scroll_max": 2,
+            "rest_every": 0,
+        },
+    }
+
+    # 看完一条详情后最少停顿
+    read_min: float = Field(3, ge=0, le=600)
+    # 看完一条详情后最多停顿
+    read_max: float = Field(8, ge=0, le=600)
+    # 下滑翻页后最少停顿
+    scroll_min: float = Field(2, ge=0, le=600)
+    # 下滑翻页后最多停顿
+    scroll_max: float = Field(5, ge=0, le=600)
+    # 每抓多少条歇一次（0 表示不歇）
+    rest_every: int = Field(15, ge=0, le=1000)
+    # 歇一次最少多久
+    rest_min: float = Field(30, ge=0, le=600)
+    # 歇一次最多多久
+    rest_max: float = Field(60, ge=0, le=600)
+
+    @classmethod
+    def preset(cls, code: str) -> PaceProfile:
+        """预设速率码 → 节奏；未知码按「正常」。"""
+        return cls(**cls.PRESETS.get(code, {}))
+
+    @classmethod
+    def from_plan(cls, plan: Mapping[str, Any]) -> PaceProfile:
+        """方案 → 节奏：自定义读明细参数，否则按预设；参数不合法退回「正常」。"""
+        code = str(plan.get("pace") or "")
+        if code != cls.CUSTOM:
+            return cls.preset(code)
+        try:
+            return cls.model_validate(plan.get("pace_params") or {})
+        except ValidationError:
+            return cls()
+
+    @property
+    def read(self) -> tuple[float, float]:
+        """看完一条后的停顿区间。"""
+        return self._sorted(self.read_min, self.read_max)
+
+    @property
+    def scroll(self) -> tuple[float, float]:
+        """翻页后的停顿区间。"""
+        return self._sorted(self.scroll_min, self.scroll_max)
+
+    @property
+    def rest(self) -> tuple[float, float]:
+        """歇一次的时长区间。"""
+        return self._sorted(self.rest_min, self.rest_max)
+
+    def describe(self) -> str:
+        """给配置页看的一句话说明。"""
+        read, scroll = self._span(self.read), self._span(self.scroll)
+        text = f"每条停 {read} 秒，翻页停 {scroll} 秒"
+        if self.rest_every:
+            text += f"，每 {self.rest_every} 条歇 {self._span(self.rest)} 秒"
+        return text
+
+    @staticmethod
+    def _sorted(low: float, high: float) -> tuple[float, float]:
+        """最小 / 最大填反了也照样成区间。"""
+        return (low, high) if low <= high else (high, low)
+
+    @staticmethod
+    def _span(span: tuple[float, float]) -> str:
+        """(3, 8) → "3–8"。"""
+        return f"{span[0]:g}–{span[1]:g}"
+
+
+class Defaults:
+    """新建 / 种子方案时的默认筛选值。"""
+
+    QUERY = "ai应用开发"
+    CITY_CODE = City.code("广州")
+    JOB_TYPE = JobType.code("全职")
+    SALARY = ""
+    PACE = Pace.code(Pace.default_label)
+
+
+class SearchUrl:
+    """根据求职方案拼装 BOSS geek jobs 搜索 URL。"""
+
+    PATH = f"{BASE_URL}/web/geek/jobs"
+
+    @classmethod
+    def build(cls, plan: Mapping[str, Any] | Any) -> str:
+        """支持 dict 或带同名属性的对象。"""
+
+        def _get(key: str, default: Any = "") -> Any:
+            if isinstance(plan, Mapping):
+                return plan.get(key, default)
+            return getattr(plan, key, default)
+
+        def _list(key: str) -> list[str]:
+            raw = _get(key) or []
+            return [] if isinstance(raw, str) else list(raw)
+
+        params: dict[str, str] = {}
+        query = str(_get("query") or "").strip()
+        city = str(_get("city_code") or Defaults.CITY_CODE).strip()
+        job_type = str(_get("job_type") or "").strip()
+        salary = str(_get("salary") or "").strip()
+
+        if query:
+            params["query"] = query
+        if city:
+            params["city"] = city
+        if job_type:
+            params["jobType"] = job_type
+        if salary:
+            params["salary"] = salary
+
+        for param, field, values in (
+            ("experience", Experience, _list("experience")),
+            ("degree", Education, _list("education")),
+            ("stage", Funding, _list("funding")),
+            ("scale", Scale, _list("scale")),
+        ):
+            codes = field.codes(values)
+            if codes:
+                params[param] = ",".join(codes)
+
+        return f"{cls.PATH}?{urlencode(params)}"
