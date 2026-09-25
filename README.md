@@ -33,6 +33,8 @@
    - Windows：`.msi` 或 `.exe`
    - macOS：`.dmg`（Apple 芯片选 `aarch64`，Intel 选 `x64`）
    - Linux：`.AppImage` / `.deb` / `.rpm`
+
+   > 目前已在 Windows 10 / 11 和 macOS 上测试可正常使用；**不支持 Windows 7**；Linux 版本尚未完整测试。
 2. 安装 [Google Chrome](https://www.google.com/chrome/)（自动投递通过本机 Chrome 完成）
 3. 准备一个 [DeepSeek API Key](https://platform.deepseek.com/api_keys)
 
@@ -100,6 +102,9 @@
 
 **每天能投多少个？**
 BOSS 直聘每天约 150 次沟通上限，Ghost Job 会在达到上限时自动停止。
+
+**支持哪些系统？**
+已在 Windows 10 / 11 和 macOS 上测试可正常使用。不支持 Windows 7。Linux 提供了安装包，但尚未完整测试，遇到问题欢迎反馈。
 
 **macOS 提示「无法验证开发者」怎么办？**
 在应用上右键选择「打开」，或前往「系统设置 → 隐私与安全性」点击「仍要打开」。
