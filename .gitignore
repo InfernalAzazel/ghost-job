@@ -10,6 +10,8 @@ docs/
 # reflex-desktop Tauri scaffolds (generated)
 tauri/
 tauri-dev/
+# 打包时由 uv export 生成的内置后端依赖
+/requirements.txt
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -241,3 +243,4 @@ desktop/out/
 
 # Reflex
 reflex.lock/
+/frontend.zip

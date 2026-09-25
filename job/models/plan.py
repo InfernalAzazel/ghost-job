@@ -11,6 +11,9 @@ from sqlmodel import Field, SQLModel, col, select
 
 from job.boss.filters import Defaults
 
+# 匹配度过滤的默认最低分
+DEFAULT_MIN_SCORE = 60
+
 
 def _session():
     from job.models import db_session
@@ -79,7 +82,7 @@ class SearchPlanRow(SQLModel, table=True):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
     name: str = Field(index=True, description="方案名称")
     is_default: bool = Field(default=False, description="是否默认方案（全局唯一语义）")
-    is_active: bool = Field(default=False, description="是否当前选用（抓取用这份）")
+    is_active: bool = Field(default=False, description="是否当前选用（投递用这份）")
     query: str = Field(default="", description="岗位关键词")
     city_code: str = Field(default="", description="城市编码")
     job_type: str = Field(default="", description="求职类型编码")
@@ -96,7 +99,7 @@ class SearchPlanRow(SQLModel, table=True):
     pace: str = Field(
         default=Defaults.PACE,
         sa_column_kwargs={"server_default": Defaults.PACE},
-        description="抓取速率码（slow / normal / fast / custom）",
+        description="投递速率码（slow / normal / fast / custom）",
     )
     pace_json: str = Field(
         default="{}",
@@ -112,6 +115,31 @@ class SearchPlanRow(SQLModel, table=True):
         default="",
         sa_column_kwargs={"server_default": ""},
         description="AI 复核用的目标岗位要求",
+    )
+    resume_match: bool = Field(
+        default=False,
+        sa_column_kwargs={"server_default": "0"},
+        description="是否用大模型比对岗位详情与简历技术，不匹配则跳过",
+    )
+    score_filter: bool = Field(
+        default=False,
+        sa_column_kwargs={"server_default": "0"},
+        description="是否按匹配度过滤（需开启简历技术匹配）",
+    )
+    min_score: int = Field(
+        default=DEFAULT_MIN_SCORE,
+        sa_column_kwargs={"server_default": str(DEFAULT_MIN_SCORE)},
+        description="最低匹配度 0–100，低于它的岗位跳过",
+    )
+    resume_path: str = Field(
+        default="",
+        sa_column_kwargs={"server_default": ""},
+        description="简历 PDF 本地路径",
+    )
+    resume_text: str = Field(
+        default="",
+        sa_column_kwargs={"server_default": ""},
+        description="简历文本（从 PDF 解析，可手动修改）",
     )
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
@@ -135,6 +163,11 @@ class SearchPlanRow(SQLModel, table=True):
             "pace_params": _loads_dict(self.pace_json),
             "ai_review": self.ai_review,
             "ai_requirement": self.ai_requirement,
+            "resume_match": self.resume_match,
+            "score_filter": self.score_filter,
+            "min_score": self.min_score,
+            "resume_path": self.resume_path,
+            "resume_text": self.resume_text,
             "updated_at": self.updated_at.isoformat() if self.updated_at else "",
         }
 
@@ -213,6 +246,11 @@ class SearchPlanRow(SQLModel, table=True):
         pace_params: dict[str, float] | None = None,
         ai_review: bool | None = None,
         ai_requirement: str | None = None,
+        resume_match: bool | None = None,
+        score_filter: bool | None = None,
+        min_score: int | None = None,
+        resume_path: str | None = None,
+        resume_text: str | None = None,
         name: str | None = None,
         **lists: list[str] | None,
     ) -> dict[str, Any]:
@@ -248,6 +286,16 @@ class SearchPlanRow(SQLModel, table=True):
                 row.ai_review = ai_review
             if ai_requirement is not None:
                 row.ai_requirement = ai_requirement
+            if resume_match is not None:
+                row.resume_match = resume_match
+            if score_filter is not None:
+                row.score_filter = score_filter
+            if min_score is not None:
+                row.min_score = max(0, min(100, min_score))
+            if resume_path is not None:
+                row.resume_path = resume_path
+            if resume_text is not None:
+                row.resume_text = resume_text
             row.updated_at = datetime.now(UTC)
             session.add(row)
             session.commit()
@@ -296,6 +344,11 @@ class SearchPlanRow(SQLModel, table=True):
                 pace_json=src.pace_json if src else "{}",
                 ai_review=src.ai_review if src else False,
                 ai_requirement=src.ai_requirement if src else "",
+                resume_match=src.resume_match if src else False,
+                score_filter=src.score_filter if src else False,
+                min_score=src.min_score if src else DEFAULT_MIN_SCORE,
+                resume_path=src.resume_path if src else "",
+                resume_text=src.resume_text if src else "",
                 updated_at=datetime.now(UTC),
                 **({c: getattr(src, c) for c in _list_columns()} if src else {}),
             )
@@ -368,7 +421,7 @@ class SearchPlanRow(SQLModel, table=True):
 
     @classmethod
     def set_active(cls, plan_id: str) -> dict[str, Any]:
-        """切换当前方案（抓取与配置页编辑这份）。"""
+        """切换当前方案（投递与配置页编辑这份）。"""
         with _session() as session:
             target = session.get(cls, plan_id)
             if target is None:

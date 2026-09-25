@@ -11,9 +11,11 @@ from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
 
 
 class JobsPage:
-    """岗位管理：表格浏览、搜索、详情、删除。"""
+    """岗位管理：表格浏览、搜索、详情、删除、勾选后 AI 分析匹配度。"""
 
     PAGE_SIZE_OPTIONS = ["15 / page", "30 / page", "50 / page"]
+    # 操作列宽度（表头与数据行对齐）
+    ACTION_WIDTH = "170px"
 
     @classmethod
     def create(cls) -> rx.Component:
@@ -24,6 +26,8 @@ class JobsPage:
                 cls._table(),
                 cls._pagination(),
                 cls._detail_dialog(),
+                cls._delete_dialog(),
+                cls._batch_delete_dialog(),
                 bg=CARD,
                 border=f"1px solid {BORDER}",
                 border_radius="16px",
@@ -37,25 +41,20 @@ class JobsPage:
                 flex_direction="column",
                 overflow="hidden",
             ),
-            max_width="1200px",
         )
 
     @classmethod
     def _toolbar(cls) -> rx.Component:
         return rx.hstack(
             rx.text("岗位数据", font_weight="700", font_size="1.05em", color=TEXT),
+            rx.cond(JobsState.selected_count > 0, cls._selection_bar()),
             rx.spacer(),
             rx.select(
-                ["全部沟通状态"],
-                value="全部沟通状态",
+                JobsState.analysis_options,
+                value=JobsState.analysis,
+                on_change=JobsState.set_analysis,
                 size="2",
-                width="140px",
-            ),
-            rx.select(
-                ["全部分析状态"],
-                value="全部分析状态",
-                size="2",
-                width="140px",
+                width="150px",
             ),
             rx.box(
                 rx.hstack(
@@ -65,8 +64,14 @@ class JobsPage:
                         on_change=JobsState.set_search_and_reload.debounce(350),
                         placeholder="搜索岗位或公司",
                         variant="soft",
+                        color_scheme="gray",
                         width="220px",
                         size="2",
+                        style={
+                            "background": "transparent",
+                            "box_shadow": "none",
+                            "outline": "none",
+                        },
                     ),
                     spacing="2",
                     align="center",
@@ -84,6 +89,50 @@ class JobsPage:
             margin_bottom="1em",
         )
 
+    @staticmethod
+    def _selection_bar() -> rx.Component:
+        """勾选后出现：已选数量、AI 分析、批量删除、取消选择。"""
+        return rx.hstack(
+            rx.text(
+                f"已选 {JobsState.selected_count} 项",
+                font_size="0.85em",
+                color=ACCENT,
+                font_weight="600",
+            ),
+            rx.button(
+                rx.icon("sparkles", size=14),
+                rx.cond(
+                    JobsState.analyzing,
+                    f"分析中 {JobsState.analyzed}/{JobsState.selected_count}",
+                    "AI 分析",
+                ),
+                on_click=JobsState.analyze_selected,
+                loading=JobsState.analyzing,
+                size="2",
+                style={"background": ACCENT, "color": "white"},
+            ),
+            rx.button(
+                rx.icon("trash-2", size=14),
+                "批量删除",
+                on_click=JobsState.set_batch_delete_open(True),
+                disabled=JobsState.analyzing,
+                color_scheme="red",
+                variant="soft",
+                size="2",
+            ),
+            rx.button(
+                "取消选择",
+                on_click=JobsState.clear_selection,
+                disabled=JobsState.analyzing,
+                variant="ghost",
+                color_scheme="gray",
+                size="2",
+            ),
+            spacing="3",
+            align="center",
+            margin_left="0.75em",
+        )
+
     @classmethod
     def _table(cls) -> rx.Component:
         return rx.box(
@@ -96,7 +145,7 @@ class JobsPage:
             rx.cond(
                 JobsState.rows.length() == 0,
                 rx.center(
-                    rx.text("暂无岗位数据，请先在工作台抓取", color=MUTED),
+                    rx.text("暂无岗位数据，请先在工作台自动投递", color=MUTED),
                     width="100%",
                     padding_y="3em",
                 ),
@@ -120,17 +169,17 @@ class JobsPage:
     def _header_row(cls) -> rx.Component:
         return rx.hstack(
             rx.checkbox(
+                checked=JobsState.all_selected,
                 on_change=lambda _: JobsState.toggle_select_all(),
+                disabled=JobsState.analyzing,
                 size="1",
             ),
             rx.text("岗位名称", font_size="0.8em", color=MUTED, font_weight="600", flex="1.4"),
             rx.text("公司", font_size="0.8em", color=MUTED, font_weight="600", flex="1"),
             rx.text("匹配度", font_size="0.8em", color=MUTED, font_weight="600", width="90px"),
-            rx.text("沟通状态", font_size="0.8em", color=MUTED, font_weight="600", width="90px"),
-            rx.text("最新消息", font_size="0.8em", color=MUTED, font_weight="600", flex="0.8"),
             rx.box(
                 rx.text("操作", font_size="0.8em", color=MUTED, font_weight="600"),
-                width="320px",
+                width=cls.ACTION_WIDTH,
                 border_left=f"1px solid {BORDER}",
                 padding_left="0.75em",
             ),
@@ -142,10 +191,27 @@ class JobsPage:
         )
 
     @staticmethod
+    def _action(icon: str, label: str, on_click, color: str = ACCENT) -> rx.Component:
+        """操作列里的文字按钮：图标 + 文字，悬停变淡。"""
+        return rx.hstack(
+            rx.icon(icon, size=16),
+            rx.text(label, font_size="0.9em"),
+            spacing="1",
+            align="center",
+            color=color,
+            cursor="pointer",
+            white_space="nowrap",
+            _hover={"opacity": "0.7"},
+            on_click=on_click,
+        )
+
+    @staticmethod
     def _data_row(job: rx.Var, _index: rx.Var) -> rx.Component:
         return rx.hstack(
             rx.checkbox(
+                checked=JobsState.selected.contains(job["uid"]),
                 on_change=lambda _: JobsState.toggle_select(job["uid"]),
+                disabled=JobsState.analyzing,
                 size="1",
             ),
             rx.vstack(
@@ -159,72 +225,23 @@ class JobsPage:
             rx.text(job["company"], font_size="0.85em", color=TEXT, flex="1", min_width="0"),
             rx.badge(
                 job["matchStatus"],
-                color_scheme="gray",
+                color_scheme=rx.cond(job["matchHigh"], "green", "gray"),
                 variant="soft",
                 width="90px",
-            ),
-            rx.badge(
-                job["chatStatus"],
-                color_scheme="orange",
-                variant="soft",
-                width="90px",
-            ),
-            rx.text(
-                job["latestMessage"],
-                font_size="0.85em",
-                color=MUTED,
-                flex="0.8",
             ),
             rx.hstack(
-                rx.button(
-                    rx.hstack(
-                        rx.icon("eye", size=14),
-                        rx.text("详情", font_size="0.8em"),
-                        spacing="1",
-                    ),
-                    size="1",
-                    variant="ghost",
-                    color=ACCENT,
-                    on_click=JobsState.open_detail(job["uid"]),
+                JobsPage._action("eye", "详情", JobsState.open_detail(job["uid"])),
+                JobsPage._action(
+                    "trash-2",
+                    "删除",
+                    JobsState.ask_delete(job["uid"], job["title"]),
+                    color="#f04438",
                 ),
-                rx.button(
-                    rx.hstack(
-                        rx.icon("message-circle", size=14),
-                        rx.text("沟通记录", font_size="0.8em"),
-                        spacing="1",
-                    ),
-                    size="1",
-                    variant="ghost",
-                    color=ACCENT,
-                    on_click=JobsState.coming_soon,
-                ),
-                rx.button(
-                    rx.hstack(
-                        rx.icon("bot", size=14),
-                        rx.text("模拟面试", font_size="0.8em"),
-                        spacing="1",
-                    ),
-                    size="1",
-                    variant="ghost",
-                    color=ACCENT,
-                    on_click=JobsState.coming_soon,
-                ),
-                rx.button(
-                    rx.hstack(
-                        rx.icon("trash-2", size=14),
-                        rx.text("删除", font_size="0.8em"),
-                        spacing="1",
-                    ),
-                    size="1",
-                    variant="ghost",
-                    color="red",
-                    on_click=JobsState.delete_one(job["uid"]),
-                ),
-                spacing="1",
-                width="320px",
+                spacing="5",
+                align="center",
+                width=JobsPage.ACTION_WIDTH,
                 border_left=f"1px solid {BORDER}",
-                padding_left="0.5em",
-                flex_wrap="wrap",
+                padding_left="0.75em",
             ),
             width="100%",
             align="center",
@@ -276,6 +293,65 @@ class JobsPage:
             align="center",
             margin_top="0.85em",
             flex_shrink="0",
+        )
+
+    @staticmethod
+    def _delete_dialog() -> rx.Component:
+        """删除确认框。"""
+        return rx.alert_dialog.root(
+            rx.alert_dialog.content(
+                rx.alert_dialog.title("删除岗位"),
+                rx.alert_dialog.description(
+                    f"确定删除「{JobsState.pending_delete['title']}」吗？删除后无法恢复。"
+                ),
+                rx.flex(
+                    rx.alert_dialog.cancel(
+                        rx.button("取消", variant="soft", color_scheme="gray")
+                    ),
+                    rx.alert_dialog.action(
+                        rx.button(
+                            "删除", color_scheme="red", on_click=JobsState.confirm_delete
+                        )
+                    ),
+                    spacing="3",
+                    justify="end",
+                    margin_top="1em",
+                ),
+                max_width="420px",
+            ),
+            open=JobsState.pending_delete.length() > 0,
+            on_open_change=JobsState.set_delete_open,
+        )
+
+    @staticmethod
+    def _batch_delete_dialog() -> rx.Component:
+        """批量删除确认框。"""
+        return rx.alert_dialog.root(
+            rx.alert_dialog.content(
+                rx.alert_dialog.title("批量删除"),
+                rx.alert_dialog.description(
+                    f"确定删除选中的 {JobsState.selected_count} 个岗位吗？"
+                    "删除后无法恢复。"
+                ),
+                rx.flex(
+                    rx.alert_dialog.cancel(
+                        rx.button("取消", variant="soft", color_scheme="gray")
+                    ),
+                    rx.alert_dialog.action(
+                        rx.button(
+                            "删除",
+                            color_scheme="red",
+                            on_click=JobsState.delete_selected,
+                        )
+                    ),
+                    spacing="3",
+                    justify="end",
+                    margin_top="1em",
+                ),
+                max_width="420px",
+            ),
+            open=JobsState.batch_delete_open,
+            on_open_change=JobsState.set_batch_delete_open,
         )
 
     @classmethod

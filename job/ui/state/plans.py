@@ -18,7 +18,8 @@ from job.boss.filters import (
     Scale,
 )
 from job.models import init_db
-from job.models.plan import LIST_FIELDS, SearchPlanRow
+from job.models.plan import DEFAULT_MIN_SCORE, LIST_FIELDS, SearchPlanRow
+from job.utils.resume import ResumePdf
 
 
 class PlansState(rx.State):
@@ -46,8 +47,16 @@ class PlansState(rx.State):
     )
     ai_review: bool = False
     ai_requirement: str = ""
+    resume_match: bool = False
+    score_filter: bool = False
+    min_score: int = DEFAULT_MIN_SCORE
+    resume_path: str = ""
+    resume_text: str = ""
+    resume_hint: str = ""
     # 配置中心左侧当前菜单：plan / llm
     section: str = "plan"
+    # 求职方案下的标签页：filters / resume
+    plan_tab: str = "filters"
     # 当前展开的下拉多选字段与搜索词
     combo_open: str = ""
     combo_query: str = ""
@@ -100,7 +109,7 @@ class PlansState(rx.State):
     def pace_hint(self) -> str:
         """当前速率的节奏说明；预设档附带「切到自定义才能改」的提示。"""
         text = PaceProfile.model_validate(self.pace_params).describe()
-        return text if self.pace_custom else f"{text}；切到「自定义」后可修改明细参数"
+        return text if self.pace_custom else f"{text}；选择「自定义」可自行调整"
 
     def _load_from_plan(self, plan: dict) -> None:
         self.plan_id = str(plan.get("id") or "")
@@ -116,6 +125,12 @@ class PlansState(rx.State):
         self.pace_params = PaceProfile.from_plan(plan).model_dump()
         self.ai_review = bool(plan.get("ai_review"))
         self.ai_requirement = str(plan.get("ai_requirement") or "")
+        self.resume_match = bool(plan.get("resume_match"))
+        self.score_filter = bool(plan.get("score_filter"))
+        self.min_score = int(plan.get("min_score", DEFAULT_MIN_SCORE))
+        self.resume_path = str(plan.get("resume_path") or "")
+        self.resume_text = str(plan.get("resume_text") or "")
+        self.resume_hint = ""
         self.rename_draft = self.plan_name
         self.error = ""
 
@@ -139,6 +154,11 @@ class PlansState(rx.State):
             pace_params=self.pace_params,
             ai_review=self.ai_review,
             ai_requirement=self.ai_requirement,
+            resume_match=self.resume_match,
+            score_filter=self.score_filter,
+            min_score=self.min_score,
+            resume_path=self.resume_path,
+            resume_text=self.resume_text,
             **{field: getattr(self, field) for field in LIST_FIELDS},
         )
         self.save_hint = "配置已自动保存"
@@ -290,7 +310,7 @@ class PlansState(rx.State):
         try:
             profile = PaceProfile.model_validate({**self.pace_params, key: value})
         except ValidationError:
-            self.save_hint = "速率参数需为 0–600 之间的数字"
+            self.save_hint = "请输入 0–600 之间的数字"
             return
         self.pace_params = profile.model_dump()
         self._persist_filters()
@@ -298,6 +318,59 @@ class PlansState(rx.State):
     @rx.event
     def set_section(self, value: str):
         self.section = value
+
+    @rx.event
+    def set_plan_tab(self, value: str):
+        self.plan_tab = value
+
+    @rx.event
+    def set_resume_match(self, value: bool):
+        self.resume_match = value
+        self._persist_filters()
+
+    @rx.event
+    def set_score_filter(self, value: bool):
+        self.score_filter = value
+        self._persist_filters()
+
+    @rx.event
+    def set_min_score(self, value: str):
+        """改最低匹配度：需为 0–100 的整数。"""
+        try:
+            score = int(value)
+        except ValueError:
+            score = -1
+        if not 0 <= score <= 100:
+            self.save_hint = "请输入 0–100 之间的整数"
+            return
+        self.min_score = score
+        self._persist_filters()
+
+    @rx.event
+    def set_resume_text(self, value: str):
+        self.resume_text = value
+        self._persist_filters()
+
+    @rx.event
+    async def upload_resume(self, files: list[rx.UploadFile]):
+        """选择 PDF：存到本地数据目录并解析成文本，覆盖当前简历内容。"""
+        if not files:
+            return
+        file = files[0]
+        data = await file.read()
+        try:
+            text = ResumePdf.extract_text(data)
+        except ValueError as exc:
+            self.resume_hint = str(exc)
+            return
+        self.resume_path = str(ResumePdf.save(file.name or "resume.pdf", data))
+        self.resume_text = text
+        self.resume_hint = (
+            f"已识别简历内容，共 {len(text)} 字"
+            if text
+            else "未能识别简历文字，请直接粘贴简历内容"
+        )
+        self._persist_filters()
 
     @rx.event
     def set_ai_review(self, value: bool):

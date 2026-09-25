@@ -1,0 +1,141 @@
+name: Release CI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REFLEX_TELEMETRY_ENABLED: "false"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-stage:
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-22.04
+          - name: macos-aarch64
+            os: macos-latest
+          - name: macos-x86_64
+            os: macos-15-intel
+          - name: windows-x86_64
+            os: windows-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Tauri CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: |
+          uv sync --frozen --no-dev
+          uv export --frozen --no-dev --no-hashes --no-emit-project -o requirements.txt
+
+      - name: Resolve version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "APP_VERSION=$(uv run python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')" >> "$GITHUB_ENV"
+          fi
+
+      - name: Export frontend and scaffold Tauri project
+        run: uv run reflex export --frontend-only
+
+      - name: Apply version and icons
+        working-directory: tauri/src-tauri
+        run: |
+          uv run python - <<'EOF'
+          import json, os, pathlib
+          conf = pathlib.Path("tauri.conf.json")
+          data = json.loads(conf.read_text())
+          data["version"] = os.environ["APP_VERSION"]
+          conf.write_text(json.dumps(data, indent=2) + "\n")
+          EOF
+          cargo tauri icon ../../assets/icon.png
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tauri/src-tauri -> target
+          key: ${{ matrix.name }}
+
+      - name: Build app bundle
+        run: uv run reflex-desktop build --bundle --skip-export
+
+      - name: Collect installers
+        run: |
+          mkdir -p dist
+          bundle=tauri/src-tauri/target/release/bundle
+          find "$bundle" -maxdepth 2 -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
+               -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
+            -exec cp {} dist/ \;
+          ls -la dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghost-job-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+
+  release-stage:
+    needs: build-stage
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ghost-job-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Ghost Job ${{ github.ref_name }}
+          body: 下载与你系统对应的安装包即可使用；运行前请确保已安装 Google Chrome。
+          prerelease: false
+          generate_release_notes: true
+          files: artifacts/**

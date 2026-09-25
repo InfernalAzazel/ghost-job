@@ -7,8 +7,10 @@ config = rx.Config(
     cors_allowed_origins=["*"],
     plugins=[
         DesktopPlugin(
-            backend="remote",
+            # 发布包内置 Python 后端；`reflex-desktop dev` 会自动改用本地 dev 服务
+            backend="embedded",
             product_name="Ghost Job",
+            identifier="com.infernalazazel.ghostjob",
             window_title="Ghost Job",
             window_width=1180,
             window_height=820,

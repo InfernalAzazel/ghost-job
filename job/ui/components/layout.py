@@ -13,12 +13,16 @@ PAGE_ROOT_STYLE = {
 }
 
 
-def page_root(*children, max_width: str = "1100px") -> rx.Component:
+# 所有页面统一的内容最大宽度，切换页面时不跳动
+CONTENT_MAX_WIDTH = "1240px"
+
+
+def page_root(*children) -> rx.Component:
     """Full-viewport shell: outer never scrolls; children fill remaining height."""
     return rx.box(
         rx.box(
             *children,
-            max_width=max_width,
+            max_width=CONTENT_MAX_WIDTH,
             width="100%",
             margin="0 auto",
             padding="1.25em 1.5em 1.25em",

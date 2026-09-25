@@ -198,7 +198,7 @@ class KeywordFilter(BaseModel):
 
 
 class Pace(FilterField):
-    """抓取速率（不进 URL）：文案 → 节奏码，节奏细节见 ``PaceProfile``。"""
+    """投递速率（不进 URL）：文案 → 节奏码，节奏细节见 ``PaceProfile``。"""
 
     default_label: ClassVar[str] = "正常"
     options: ClassVar[dict[str, str]] = {
@@ -210,7 +210,7 @@ class Pace(FilterField):
 
 
 class PaceProfile(BaseModel):
-    """抓取节奏明细：各步骤之后的随机停顿（秒），默认值即「正常」。"""
+    """投递节奏明细：各步骤之后的随机停顿（秒），默认值即「正常」。"""
 
     model_config = ConfigDict(frozen=True)
 
@@ -245,7 +245,7 @@ class PaceProfile(BaseModel):
     scroll_min: float = Field(2, ge=0, le=600)
     # 下滑翻页后最多停顿
     scroll_max: float = Field(5, ge=0, le=600)
-    # 每抓多少条歇一次（0 表示不歇）
+    # 每投递多少条歇一次（0 表示不歇）
     rest_every: int = Field(15, ge=0, le=1000)
     # 歇一次最少多久
     rest_min: float = Field(30, ge=0, le=600)

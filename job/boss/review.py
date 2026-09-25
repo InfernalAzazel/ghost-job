@@ -1,4 +1,4 @@
-"""AI 岗位意图复核：关键词过滤通过后，让 DeepSeek 按岗位职责判断是否符合求职要求。"""
+"""AI 岗位复核：关键词过滤通过后，让 DeepSeek 按岗位详情判断意图与简历技术是否匹配。"""
 
 from __future__ import annotations
 
@@ -21,19 +21,40 @@ if TYPE_CHECKING:
 class Verdict(BaseModel):
     """岗位复核结论。"""
 
-    match: bool = Field(description="岗位是否符合求职者的目标岗位要求")
-    reason: str = Field(description="20 字以内的中文理由")
+    match: bool = Field(description="岗位是否通过全部复核项")
+    reason: str = Field(description="20 字以内的中文理由，不通过时说明是哪一项")
+    score: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="简历技术匹配度 0–100，没给简历时为 null",
+    )
 
 
 class JobReviewer(BaseModel):
-    """用 Pydantic AI 调 DeepSeek 复核岗位；API Key 与模型来自配置中心「大模型」。"""
+    """用 Pydantic AI 调 DeepSeek 复核岗位；API Key 与模型来自配置中心「大模型」。
 
-    INSTRUCTIONS: ClassVar[str] = (
-        "你是求职助手，根据求职者的目标岗位要求判断岗位是否值得投递。"
-        "只看岗位名称和岗位职责，命中明确排除的方向一律判不符合。"
+    两项复核可单独或同时开启，同时开启时一次调用判断：
+    ``requirement`` 岗位意图（目标岗位要求），``resume`` 简历技术匹配。
+    """
+
+    BASE: ClassVar[str] = (
+        "你是求职助手，判断岗位是否值得投递，任一复核项不满足即判不符合。"
+    )
+    INTENT: ClassVar[str] = (
+        "岗位意图：对照目标岗位要求，只看岗位名称和岗位职责，"
+        "命中明确排除的方向判不符合。"
+    )
+    TECH: ClassVar[str] = (
+        "简历技术匹配：提取岗位详情里要求的核心技术栈，与简历中的技术对比，"
+        "按覆盖程度给出 0–100 的匹配度 score；"
+        "核心技术大部分简历里没有则判不符合，加分项技术不要求全部具备。"
     )
 
-    requirement: str
+    requirement: str = ""
+    resume: str = ""
+    # 最低匹配度；None 表示不按匹配度过滤
+    min_score: int | None = None
     llm: LlmSettings = Field(default_factory=LlmSettings)
     timeout: float = 30
 
@@ -41,11 +62,33 @@ class JobReviewer(BaseModel):
     def from_plan(
         cls, plan: Mapping[str, Any], llm: LlmSettings
     ) -> JobReviewer | None:
-        """方案开启复核且写了目标要求时返回复核器，否则返回 None。"""
+        """方案开启了至少一项复核（且内容非空）时返回复核器，否则返回 None。"""
         requirement = str(plan.get("ai_requirement") or "").strip()
-        if not plan.get("ai_review") or not requirement:
+        resume = str(plan.get("resume_text") or "").strip()
+        requirement = requirement if plan.get("ai_review") else ""
+        resume = resume if plan.get("resume_match") else ""
+        if not requirement and not resume:
             return None
-        return cls(requirement=requirement, llm=llm)
+        min_score = plan.get("min_score") if plan.get("score_filter") else None
+        return cls(
+            requirement=requirement, resume=resume, min_score=min_score, llm=llm
+        )
+
+    @property
+    def checks(self) -> list[str]:
+        """已开启的复核项名称。"""
+        names = (
+            ("AI 岗位筛选", self.requirement),
+            ("简历技术匹配", self.resume),
+            (f"匹配度 ≥{self.min_score}", self.resume and self.min_score is not None),
+        )
+        return [name for name, on in names if on]
+
+    @property
+    def instructions(self) -> str:
+        """按已开启的复核项拼系统提示词。"""
+        rules = ((self.INTENT, self.requirement), (self.TECH, self.resume))
+        return "\n".join([self.BASE, *(rule for rule, on in rules if on)])
 
     @cached_property
     def agent(self) -> Agent[None, Verdict]:
@@ -61,19 +104,36 @@ class JobReviewer(BaseModel):
         return Agent(
             model,
             output_type=PromptedOutput(Verdict),
-            instructions=self.INSTRUCTIONS,
+            instructions=self.instructions,
             model_settings=OpenAIChatModelSettings(
                 thinking=False, temperature=0, timeout=self.timeout
             ),
         )
 
-    async def reject_reason(self, job: Job) -> str:
-        """复核通过返回空串；不通过或调用异常时返回跳过原因。"""
+    async def check(self, job: Job) -> tuple[str, int | None]:
+        """返回 (跳过原因, 匹配度)。
+
+        通过时原因为空串；未开启简历技术匹配时匹配度为 None。
+        """
         try:
             verdict = await self.review(job)
         except AgentRunError as exc:
-            return f"AI 复核失败：{exc}"
-        return "" if verdict.match else f"AI 复核不通过：{verdict.reason}"
+            return f"AI 复核失败：{exc}", None
+        score = verdict.score if self.resume else None
+        if not verdict.match:
+            return f"AI 复核不通过：{verdict.reason}", score
+        if score is not None and self.min_score is not None and score < self.min_score:
+            return f"匹配度 {score} 分，低于 {self.min_score} 分", score
+        return "", score
+
+    async def score(self, job: Job) -> int | None:
+        """只取简历技术匹配度；未提供简历或调用失败返回 None。"""
+        if not self.resume:
+            return None
+        try:
+            return (await self.review(job)).score
+        except AgentRunError:
+            return None
 
     async def review(self, job: Job) -> Verdict:
         """调用模型给出结论；接口出错或输出不合规时抛 ``AgentRunError``。"""
@@ -81,8 +141,12 @@ class JobReviewer(BaseModel):
         return result.output
 
     def _prompt(self, job: Job) -> str:
-        return (
-            f"目标岗位要求：\n{self.requirement}\n\n"
-            f"岗位名称：{job.title}\n公司：{job.company}\n薪资：{job.salary}\n"
-            f"岗位职责：\n{job.description}"
-        )
+        parts = [
+            f"目标岗位要求：\n{self.requirement}" if self.requirement else "",
+            f"求职者简历：\n{self.resume}" if self.resume else "",
+            (
+                f"岗位名称：{job.title}\n公司：{job.company}\n薪资：{job.salary}\n"
+                f"岗位详情：\n{job.description}"
+            ),
+        ]
+        return "\n\n".join(p for p in parts if p)

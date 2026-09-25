@@ -1,24 +1,49 @@
-"""Job list management state (岗位管理)."""
+"""岗位管理状态：列表、筛选、勾选、删除与 AI 匹配度分析。"""
 
 from __future__ import annotations
 
+import asyncio
 import math
 
 import reflex as rx
 
+from job.boss.jobs import Job
+from job.boss.review import JobReviewer
 from job.models import init_db
 from job.models.job import JobRow
+from job.models.plan import SearchPlanRow
+from job.models.setting import LlmSettings
+
+# AI 分析并发数
+_ANALYZE_CONCURRENCY = 4
 
 
 class JobsState(rx.State):
     rows: list[dict] = rx.field(default_factory=list)
     total: int = 0
     search: str = ""
+    analysis: str = JobRow.ANALYSIS_FILTERS[0]
+    analysis_options: list[str] = list(JobRow.ANALYSIS_FILTERS)
     page: int = 1
     page_size: int = 15
     selected: list[str] = rx.field(default_factory=list)
     detail_open: bool = False
     detail: dict = rx.field(default_factory=dict)
+    # 待确认删除的岗位：{uid, title}；空表示确认框关闭
+    pending_delete: dict[str, str] = rx.field(default_factory=dict)
+    batch_delete_open: bool = False
+    analyzing: bool = False
+    # AI 分析进度：已完成数
+    analyzed: int = 0
+
+    @rx.var
+    def selected_count(self) -> int:
+        return len(self.selected)
+
+    @rx.var
+    def all_selected(self) -> bool:
+        visible = [str(r.get("uid") or "") for r in self.rows]
+        return bool(visible) and all(u in self.selected for u in visible)
 
     @rx.var
     def total_pages(self) -> int:
@@ -39,13 +64,16 @@ class JobsState(rx.State):
         return self.page < self.total_pages
 
     def _reload(self) -> None:
-        self.total = JobRow.count(search=self.search)
+        self.total = JobRow.count(search=self.search, analysis=self.analysis)
         max_page = max(1, math.ceil(self.total / self.page_size)) if self.page_size else 1
         if self.page > max_page:
             self.page = max_page
         offset = (self.page - 1) * self.page_size
         self.rows = JobRow.list_dicts(
-            search=self.search, limit=self.page_size, offset=offset
+            search=self.search,
+            analysis=self.analysis,
+            limit=self.page_size,
+            offset=offset,
         )
         # Drop selections that are no longer on this page
         visible = {str(r.get("uid") or "") for r in self.rows}
@@ -70,6 +98,13 @@ class JobsState(rx.State):
     @rx.event
     def set_search_and_reload(self, value: str):
         self.search = value
+        self.page = 1
+        self._reload()
+
+    @rx.event
+    def set_analysis(self, value: str):
+        """切换分析状态筛选，回到第一页。"""
+        self.analysis = value
         self.page = 1
         self._reload()
 
@@ -113,6 +148,56 @@ class JobsState(rx.State):
             self.selected = list(merged)
 
     @rx.event
+    def clear_selection(self):
+        self.selected = []
+
+    @rx.event(background=True)
+    async def analyze_selected(self):
+        """用当前方案的简历，让大模型给选中岗位打匹配度并写回。"""
+        async with self:
+            if self.analyzing or not self.selected:
+                return
+            resume = str(SearchPlanRow.get_active_dict().get("resume_text") or "")
+            llm = LlmSettings.load()
+            if not resume.strip():
+                return rx.toast.warning("请先在配置中心「简历配置」上传简历")
+            if not llm.ready:
+                return rx.toast.warning("请先在配置中心开通「AI 服务」")
+            uids = list(self.selected)
+            self.analyzing = True
+            self.analyzed = 0
+
+        reviewer = JobReviewer(resume=resume.strip(), llm=llm)
+        limit = asyncio.Semaphore(_ANALYZE_CONCURRENCY)
+
+        async def analyze(uid: str) -> bool:
+            row = JobRow.get_dict(uid)
+            if row is None:
+                return False
+            job = Job(
+                title=row["title"],
+                company=row["company"],
+                salary=row["salary"],
+                description=row["description"],
+            )
+            async with limit:
+                score = await reviewer.score(job)
+            ok = score is not None and JobRow.set_score(uid, score)
+            async with self:
+                self.analyzed += 1
+            return ok
+
+        results = await asyncio.gather(*(analyze(uid) for uid in uids))
+        done = sum(results)
+        async with self:
+            self.analyzing = False
+            self.selected = []
+            self._reload()
+        if done == len(uids):
+            return rx.toast.success(f"已完成 {done} 个岗位的匹配度分析")
+        return rx.toast.warning(f"分析完成 {done} 个，失败 {len(uids) - done} 个")
+
+    @rx.event
     def open_detail(self, uid: str):
         job = JobRow.get_dict(uid)
         if job is None:
@@ -129,7 +214,22 @@ class JobsState(rx.State):
         self.detail_open = is_open
 
     @rx.event
-    def delete_one(self, uid: str):
+    def ask_delete(self, uid: str, title: str):
+        """点删除：先弹确认框。"""
+        self.pending_delete = {"uid": uid, "title": title}
+
+    @rx.event
+    def set_delete_open(self, is_open: bool):
+        if not is_open:
+            self.pending_delete = {}
+
+    @rx.event
+    def confirm_delete(self):
+        """确认框里点「删除」：真正删除并关闭确认框。"""
+        uid = self.pending_delete.get("uid", "")
+        self.pending_delete = {}
+        if not uid:
+            return
         JobRow.delete_by_uid(uid)
         self.selected = [u for u in self.selected if u != uid]
         if self.detail.get("uid") == uid:
@@ -137,13 +237,18 @@ class JobsState(rx.State):
         self._reload()
 
     @rx.event
-    def delete_selected(self):
-        if not self.selected:
-            return
-        JobRow.delete_by_uids(list(self.selected))
-        self.selected = []
-        self._reload()
+    def set_batch_delete_open(self, is_open: bool):
+        self.batch_delete_open = is_open and bool(self.selected)
 
     @rx.event
-    def coming_soon(self):
-        return rx.toast.info("功能开发中，敬请期待")
+    def delete_selected(self):
+        """批量删除确认框里点「删除」：删除全部选中岗位。"""
+        self.batch_delete_open = False
+        if not self.selected:
+            return
+        count = JobRow.delete_many(list(self.selected))
+        if self.detail.get("uid") in self.selected:
+            self.detail_open = False
+        self.selected = []
+        self._reload()
+        return rx.toast.success(f"已删除 {count} 个岗位")

@@ -11,18 +11,20 @@ from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
 
 
 class WorkbenchPage:
-    """工作台：抓取控制与运行日志。"""
+    """工作台：自动投递控制与运行日志。"""
 
     @classmethod
     def create(cls) -> rx.Component:
         return page_root(
             rx.box(site_header(active="workbench"), flex_shrink="0", width="100%"),
             rx.hstack(
-                cls._stat_card("运行状态", BossState.boss_state, "当前会话", "rocket"),
                 cls._stat_card(
-                    "已入库岗位", BossState.stored_count, "本地 SQLite", "database"
+                    "投递状态", BossState.boss_state, "实时更新", "activity"
                 ),
-                cls._stat_card("本次抓取", BossState.session_count, "当前任务", "list"),
+                cls._stat_card(
+                    "累计投递", BossState.stored_count, "历史沟通过的岗位", "briefcase"
+                ),
+                cls._stat_card("本次投递", BossState.session_count, "本轮新增", "send"),
                 spacing="3",
                 width="100%",
                 flex_wrap="wrap",
@@ -39,7 +41,6 @@ class WorkbenchPage:
                 margin_top="1em",
                 overflow="hidden",
             ),
-            max_width="1100px",
         )
 
     @classmethod
@@ -74,17 +75,13 @@ class WorkbenchPage:
     def _platform_panel(cls) -> rx.Component:
         status_hint = rx.cond(
             BossState.busy,
-            "任务进行中…",
-            rx.cond(
-                BossState.boss_state == "ready",
-                "Chrome 已就绪，可以开始抓取",
-                "等待启动 Chrome / 抓取",
-            ),
+            "正在为你投递，可随时停止",
+            "准备好后点击下方按钮开始，浏览器会自动打开",
         )
         return rx.box(
-            rx.heading("抓取控制", size="5", color=TEXT),
+            rx.heading("自动投递", size="5", color=TEXT),
             rx.text(
-                "使用本机 Chrome 打开 BOSS，抓取列表与详情并写入本地 SQLite。",
+                "按求职方案智能筛选合适的岗位，自动替你向 HR 打招呼。",
                 color=MUTED,
                 font_size="0.85em",
                 margin_top="0.35em",
@@ -100,8 +97,13 @@ class WorkbenchPage:
             ),
             rx.box(
                 rx.vstack(
-                    rx.text("环境状态", font_weight="600", font_size="0.85em", color=TEXT),
-                    rx.text(BossState.boss_state, font_size="0.8em", color=MUTED),
+                    rx.text("当前状态", font_size="0.8em", color=MUTED),
+                    rx.text(
+                        BossState.boss_state,
+                        font_weight="600",
+                        font_size="0.95em",
+                        color=TEXT,
+                    ),
                     rx.text(status_hint, font_size="0.8em", color=MUTED),
                     align="start",
                     spacing="1",
@@ -116,18 +118,9 @@ class WorkbenchPage:
             ),
             rx.vstack(
                 rx.button(
-                    rx.hstack(rx.icon("monitor", size=16), rx.text("打开 BOSS"), spacing="2"),
-                    on_click=BossState.open_boss,
-                    disabled=BossState.busy,
-                    width="100%",
-                    size="3",
-                    variant="soft",
-                ),
-                rx.button(
-                    rx.hstack(
-                        rx.icon("search", size=16), rx.text("抓列表+详情"), spacing="2"
-                    ),
-                    on_click=BossState.start_search,
+                    rx.icon("send", size=16),
+                    "开始自动投递",
+                    on_click=BossState.start_apply,
                     disabled=BossState.busy,
                     width="100%",
                     size="3",
@@ -136,14 +129,14 @@ class WorkbenchPage:
                 rx.hstack(
                     rx.button(
                         "停止",
-                        on_click=BossState.stop_search,
+                        on_click=BossState.stop_apply,
                         disabled=BossState.busy == False,  # noqa: E712
                         color_scheme="red",
                         variant="soft",
                         flex="1",
                     ),
                     rx.button(
-                        "关闭 Chrome",
+                        "关闭浏览器",
                         on_click=BossState.close_boss,
                         variant="outline",
                         flex="1",
@@ -170,7 +163,7 @@ class WorkbenchPage:
 
     @staticmethod
     def _log_row(entry: rx.Var) -> rx.Component:
-        """一条日志：时间 · 级别图标 · 内容；入库绿色、跳过灰色、异常橙色。"""
+        """一条日志：时间 · 级别图标 · 内容；投递绿色、跳过灰色、异常橙色。"""
         level = entry["level"]
         icon = rx.match(
             level,
@@ -181,7 +174,7 @@ class WorkbenchPage:
         )
         tag = rx.match(
             level,
-            ("ok", rx.badge("入库", color_scheme="green", variant="soft", size="1")),
+            ("ok", rx.badge("投递", color_scheme="green", variant="soft", size="1")),
             ("skip", rx.badge("跳过", color_scheme="gray", variant="soft", size="1")),
             ("warn", rx.badge("注意", color_scheme="orange", variant="soft", size="1")),
             rx.fragment(),
@@ -217,7 +210,7 @@ class WorkbenchPage:
                 rx.vstack(
                     rx.text("运行日志", font_weight="700", color=TEXT),
                     rx.text(
-                        f"本次抓取 {BossState.session_count} · 共 {BossState.log.length()} 条",
+                        f"本次投递 {BossState.session_count} · 共 {BossState.log.length()} 条",
                         font_size="0.75em",
                         color=MUTED,
                     ),
@@ -243,7 +236,7 @@ class WorkbenchPage:
                     rx.hstack(
                         rx.icon("info", size=16, color=ACCENT),
                         rx.text(
-                            "暂无日志，开始抓取后会显示在这里",
+                            "暂无日志，开始投递后会显示在这里",
                             font_size="0.85em",
                             color=ACCENT,
                         ),

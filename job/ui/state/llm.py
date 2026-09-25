@@ -23,8 +23,8 @@ class LlmState(rx.State):
     api_key: str = ""
     model: str = ""
     model_options: list[str] = rx.field(default_factory=list)
-    hint: str = ""
-    busy: bool = False
+    # 进行中的操作：fetch / test；空表示空闲
+    action: str = ""
 
     def _settings(self) -> LlmSettings:
         return LlmSettings(
@@ -43,19 +43,16 @@ class LlmState(rx.State):
         self.api_key = settings.api_key
         self.model = settings.model
         self.model_options = settings.models
-        self.hint = ""
 
     @rx.event
     def set_api_key(self, value: str):
         self.api_key = value
         self._settings().save()
-        self.hint = ""
 
     @rx.event
     def set_model(self, value: str):
         self.model = value
         self._settings().save()
-        self.hint = ""
 
     @rx.event(background=True)
     async def fetch_models(self):
@@ -63,23 +60,22 @@ class LlmState(rx.State):
         async with self:
             settings = self._settings()
             if not settings.api_key:
-                self.hint = "请先填写 API Key"
-                return
-            self.busy = True
-            self.hint = "拉取中…"
+                return rx.toast.warning("请先填写 API Key")
+            self.action = "fetch"
         try:
             models = await settings.fetch_models()
-            hint = f"已拉取 {len(models)} 个模型，请选择"
         except APIError as exc:
-            models, hint = [], f"拉取失败：{exc.message}"
+            async with self:
+                self.action = ""
+            return rx.toast.error(f"获取失败，请检查 API Key：{exc.message}")
         async with self:
-            self.busy = False
-            self.hint = hint
+            self.action = ""
             if models:
                 self.model_options = models
                 if self.model not in models:
                     self.model = models[0]
                 self._settings().save()
+        return rx.toast.success(f"已获取 {len(models)} 个可用模型，请选择")
 
     @rx.event(background=True)
     async def test_connection(self):
@@ -87,16 +83,15 @@ class LlmState(rx.State):
         async with self:
             settings = self._settings()
             if not settings.ready:
-                self.hint = "请先填写 API Key 并选择模型"
-                return
-            self.busy = True
-            self.hint = "测试中…"
+                return rx.toast.warning("请先填写 API Key 并选择模型")
+            self.action = "test"
         reviewer = JobReviewer(requirement="只投 AI 应用开发岗位", llm=settings)
         try:
-            verdict = await reviewer.review(_SAMPLE_JOB)
-            hint = f"连接成功（样例判断：{verdict.reason or verdict.match}）"
+            await reviewer.review(_SAMPLE_JOB)
         except AgentRunError as exc:
-            hint = f"连接失败：{exc}"
+            async with self:
+                self.action = ""
+            return rx.toast.error(f"连接失败，请检查 API Key 和模型：{exc}")
         async with self:
-            self.hint = hint
-            self.busy = False
+            self.action = ""
+        return rx.toast.success("连接成功，AI 服务可以正常使用")

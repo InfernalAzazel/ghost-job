@@ -1,4 +1,4 @@
-"""BOSS scrape session state."""
+"""BOSS 自动投递会话状态。"""
 
 from __future__ import annotations
 
@@ -20,18 +20,26 @@ from job.models.setting import LlmSettings
 _session = BossSession()
 _scraper = JobScraper(_session)
 
-# 抓取结束状态 → 日志文案
+# 投递结束状态 → 状态文案
+_STATUS = {
+    "done": "已完成",
+    "stopped": "已停止",
+    "need_login": "需要登录",
+    "limit": "今日已达上限",
+}
+# 投递结束状态 → 日志文案
 _FINISHED = {
-    "done": "抓取完成",
-    "stopped": "已停止抓取",
+    "done": "投递完成",
+    "stopped": "已停止投递",
     "need_login": "需要登录 BOSS，请在浏览器里登录后重新开始",
+    "limit": "今日投递次数已用完，明天再来",
 }
 # 日志最多保留条数
 _MAX_LOG = 200
 
 
 class BossState(rx.State):
-    boss_state: str = "—"
+    boss_state: str = "空闲"
     busy: bool = False
     # 运行日志（新的在前）：{time, level, text}，level 为 info / ok / skip / warn
     log: list[dict[str, str]] = rx.field(default_factory=list)
@@ -57,44 +65,28 @@ class BossState(rx.State):
         self._refresh_stored_count()
         self._refresh_active_plan_name()
         if not self.log:
-            self._push_log(f"数据库已就绪，已入库 {self.stored_count} 条")
+            self._push_log(f"已就绪，累计投递 {self.stored_count} 个岗位")
 
     @rx.event
     def clear_log(self):
         self.log = []
 
     @rx.event
-    async def open_boss(self):
-        if self.busy:
-            return
-        self.busy = True
-        self.boss_state = "launching"
-        self._push_log("正在启动 Chrome…")
-        try:
-            await _session.open()
-            self.boss_state = "ready"
-            self._push_log("Chrome 已就绪", "ok")
-        except RuntimeError as exc:
-            self.boss_state = f"error: {exc}"
-            self._push_log(str(exc), "warn")
-        finally:
-            self.busy = False
-
-    @rx.event
-    def stop_search(self):
+    def stop_apply(self):
         _scraper.request_stop()
         self._push_log("正在停止，处理完当前岗位后结束")
-        self.boss_state = "stopping"
+        self.boss_state = "停止中"
 
     @rx.event
     async def close_boss(self):
         await _session.close()
-        self.boss_state = "done"
+        self.boss_state = "空闲"
         self.busy = False
         self._push_log("浏览器已关闭")
 
     @rx.event(background=True)
-    async def start_search(self):
+    async def start_apply(self):
+        """按当前方案自动投递；浏览器未打开时自动打开。"""
         async with self:
             if self.busy:
                 return
@@ -102,33 +94,48 @@ class BossState(rx.State):
             query = str(plan.get("query") or "").strip()
             if not query:
                 self._push_log("请先在配置中心填写岗位关键词", "warn")
-                self.boss_state = "need query"
+                self.boss_state = "待完善方案"
                 return
             url = SearchUrl.build(plan)
             pace = PaceProfile.from_plan(plan)
             keywords = KeywordFilter.from_plan(plan)
             reviewer = JobReviewer.from_plan(plan, LlmSettings.load())
+            resume = str(plan.get("resume_text") or "").strip()
+            if plan.get("resume_match") and not resume:
+                self._push_log(
+                    "已开启简历技术匹配，请先在「简历配置」上传简历", "warn"
+                )
+                self.boss_state = "待完善简历"
+                return
+            if JobRow.count_today() >= JobScraper.DAILY_LIMIT:
+                self._push_log(_FINISHED["limit"], "warn")
+                self.boss_state = _STATUS["limit"]
+                return
             if reviewer and not reviewer.llm.ready:
                 self._push_log(
-                    "已开启 AI 复核，请先在「大模型」配置 Key 与模型", "warn"
+                    "已开启 AI 筛选，请先在配置中心开通「AI 服务」", "warn"
                 )
-                self.boss_state = "need api key"
+                self.boss_state = "待开通 AI 服务"
                 return
             self.busy = True
-            self.boss_state = "navigating"
+            self.boss_state = "准备中"
             self.session_count = 0
             self.active_plan_name = str(plan.get("name") or "")
             city = City.label(str(plan.get("city_code") or ""))
-            self._push_log(f"开始抓取「{self.active_plan_name}」：{query} · {city}")
-            self._push_log(f"抓取节奏：{pace.describe()}")
+            self._push_log(
+                f"开始自动投递「{self.active_plan_name}」：{query} · {city}"
+            )
+            self._push_log(f"投递节奏：{pace.describe()}")
+            if not _session.is_open:
+                self._push_log("正在打开浏览器…")
             if reviewer:
-                self._push_log("AI 岗位意图复核已开启")
+                self._push_log(f"已开启：{'、'.join(reviewer.checks)}")
 
         async def on_job(_job) -> None:
             async with self:
                 self.session_count += 1
                 self._refresh_stored_count()
-                self.boss_state = "scraping"
+                self.boss_state = "投递中"
 
         async def on_log(level: str, text: str) -> None:
             async with self:
@@ -144,16 +151,16 @@ class BossState(rx.State):
                 on_log=on_log,
             )
             async with self:
-                self.boss_state = state
+                self.boss_state = _STATUS.get(state, "已完成")
                 self._refresh_stored_count()
                 self._push_log(
-                    f"{_FINISHED.get(state, state)}：本次入库 {self.session_count} 条，"
-                    f"累计 {self.stored_count} 条",
-                    "warn" if state == "need_login" else "info",
+                    f"{_FINISHED.get(state, state)}：本次投递 {self.session_count} 条，"
+                    f"累计投递 {self.stored_count} 条",
+                    "warn" if state in ("need_login", "limit") else "info",
                 )
                 self.busy = False
         except (RuntimeError, PlaywrightError, SQLAlchemyError) as exc:
             async with self:
-                self.boss_state = f"error: {exc}"
+                self.boss_state = "出错"
                 self._push_log(str(exc), "warn")
                 self.busy = False

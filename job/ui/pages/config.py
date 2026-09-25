@@ -6,6 +6,7 @@ from typing import Any
 
 import reflex as rx
 
+from job.ui.components.form import field_label, form_title, switch_card
 from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
 from job.ui.state import LlmState, PlansState
@@ -28,8 +29,17 @@ class ConfigPage:
 
     MENU = (
         ("求职设置", (("plan", "layout-grid", "求职方案"),)),
-        ("系统能力", (("llm", "cpu", "大模型"),)),
+        ("高级设置", (("llm", "sparkles", "AI 服务"),)),
     )
+
+    # 求职方案下的标签页：(tab, 图标, 名称)
+    PLAN_TABS = (
+        ("filters", "layout-grid", "岗位筛选"),
+        ("resume", "file-text", "简历配置"),
+    )
+
+    # 简历 PDF 上传控件 id
+    RESUME_UPLOAD = "resume_pdf"
 
     @classmethod
     def create(cls) -> rx.Component:
@@ -63,7 +73,6 @@ class ConfigPage:
                 margin_top="0.5em",
             ),
             cls._plan_manager(),
-            max_width="1240px",
         )
 
     # --- sidebar ---
@@ -131,14 +140,24 @@ class ConfigPage:
 
     @classmethod
     def _plan_panel(cls) -> rx.Component:
-        """求职方案：方案头 + 筛选卡片。"""
+        """求职方案：方案头 + 标签页（岗位筛选 / 简历配置）。"""
         return rx.fragment(
             rx.box(cls._plan_header(), flex_shrink="0", width="100%"),
+            rx.hstack(
+                *[cls._tab_item(*tab) for tab in cls.PLAN_TABS],
+                spacing="5",
+                width="100%",
+                flex_shrink="0",
+                margin_top="1em",
+                border_bottom=f"1px solid {BORDER}",
+            ),
             rx.box(
-                cls._filters_form(),
-                margin_top="1.25em",
+                rx.cond(
+                    PlansState.plan_tab == "resume",
+                    cls._resume_form(),
+                    cls._filters_form(),
+                ),
                 padding_top="1.25em",
-                border_top=f"1px solid {BORDER}",
                 width="100%",
                 flex="1",
                 min_height="0",
@@ -146,6 +165,25 @@ class ConfigPage:
                 flex_direction="column",
                 overflow="hidden",
             ),
+        )
+
+    @staticmethod
+    def _tab_item(tab: str, icon: str, label: str) -> rx.Component:
+        """方案标签页：当前页蓝字加下划线。"""
+        active = PlansState.plan_tab == tab
+        return rx.hstack(
+            rx.icon(icon, size=15),
+            rx.text(label, font_size="0.9em"),
+            spacing="2",
+            align="center",
+            padding="0.6em 0.1em",
+            margin_bottom="-1px",
+            cursor="pointer",
+            color=rx.cond(active, ACCENT, TEXT),
+            border_bottom=rx.cond(
+                active, f"2px solid {ACCENT}", "2px solid transparent"
+            ),
+            on_click=PlansState.set_plan_tab(tab),
         )
 
     @classmethod
@@ -171,8 +209,7 @@ class ConfigPage:
                         align="center",
                     ),
                     rx.text(
-                        "这张方案统一管理岗位筛选与 AI 复核，"
-                        "工作台抓取将使用当前方案。",
+                        "可为不同求职方向准备多套方案，自动投递时使用当前方案。",
                         font_size="0.8em",
                         color=MUTED,
                         margin_top="0.35em",
@@ -183,19 +220,15 @@ class ConfigPage:
                 rx.spacer(),
                 rx.hstack(
                     rx.button(
-                        rx.hstack(
-                            rx.icon("plus", size=16), rx.text("新建方案"), spacing="2"
-                        ),
+                        rx.icon("plus", size=16),
+                        "新建方案",
                         on_click=PlansState.create_plan,
                         style={"background": ACCENT, "color": "white"},
                         size="2",
                     ),
                     rx.button(
-                        rx.hstack(
-                            rx.icon("settings", size=16),
-                            rx.text("方案管理"),
-                            spacing="2",
-                        ),
+                        rx.icon("settings", size=16),
+                        "方案管理",
                         on_click=PlansState.open_manager,
                         variant="outline",
                         size="2",
@@ -212,15 +245,7 @@ class ConfigPage:
 
     # --- filters ---
 
-    @classmethod
-    def _field_label(cls, text: str) -> rx.Component:
-        return rx.text(
-            text,
-            font_size="0.85em",
-            font_weight="600",
-            color=TEXT,
-            margin_bottom="0.35em",
-        )
+    _field_label = staticmethod(field_label)
 
     @staticmethod
     def _section(title: str, *children: rx.Component, hint: str = "") -> rx.Component:
@@ -247,27 +272,161 @@ class ConfigPage:
             cls._section(
                 "基础条件",
                 cls._basic_fields(),
-                hint="搜什么岗位、在哪个城市找，会直接拼进 BOSS 搜索地址",
+                hint="你想找什么工作、在哪座城市",
             ),
             cls._section(
                 "经验 / 学历 / 公司",
                 cls._multi_fields(),
-                hint="可多选，不选表示不限，由 BOSS 按条件筛选",
+                hint="可多选，不选即不限",
             ),
             cls._section(
                 "行业与关键词",
                 cls._keyword_section(),
-                hint="行业由 BOSS 筛选；关键词按职位名 / 公司名在本地过滤，不符合的不会点开",
+                hint="只看感兴趣的行业，并用关键词避开不想要的职位和公司",
             ),
             cls._section(
-                "拟人化",
+                "投递节奏",
                 cls._pace_section(),
-                hint="模拟真人的操作节奏，同一账号每天的表现也会略有差异",
+                hint="像真人一样浏览和投递，降低账号风险",
             ),
             width="100%",
             height="100%",
             align="start",
             spacing="4",
+            flex="1",
+            min_height="0",
+            overflow_y="auto",
+            padding_right="0.35em",
+            padding_bottom="0.5em",
+        )
+
+    # --- resume ---
+
+    _switch_card = staticmethod(switch_card)
+
+    @classmethod
+    def _resume_form(cls) -> rx.Component:
+        """简历配置：技术匹配开关、PDF 附件、解析出的简历文本（可修改）。"""
+        return rx.vstack(
+            form_title(
+                "file-text",
+                "简历配置",
+                "上传你的简历，用于智能匹配岗位",
+            ),
+            cls._switch_card(
+                "简历技术匹配",
+                "投递前由 AI 对比岗位要求与你的技能，只投技术对口的岗位，"
+                "并在岗位列表显示匹配度",
+                PlansState.resume_match,
+                PlansState.set_resume_match,
+                rx.cond(
+                    PlansState.resume_match & (PlansState.resume_text == ""),
+                    rx.text(
+                        "请先上传简历或填写简历内容",
+                        font_size="0.8em",
+                        color="#f79009",
+                    ),
+                ),
+                rx.cond(
+                    PlansState.resume_match & ~LlmState.key_ready,
+                    rx.hstack(
+                        rx.text("AI 服务尚未开通，", font_size="0.8em"),
+                        rx.link(
+                            "去开通",
+                            font_size="0.8em",
+                            on_click=PlansState.set_section("llm"),
+                        ),
+                        spacing="0",
+                        color="#f79009",
+                    ),
+                ),
+            ),
+            cls._switch_card(
+                "匹配度过滤",
+                "只投递匹配度达到设定分数的岗位",
+                PlansState.score_filter,
+                PlansState.set_score_filter,
+                rx.hstack(
+                    rx.text("最低匹配度", font_size="0.85em", color=TEXT),
+                    rx.input(
+                        disabled=~PlansState.score_filter,
+                        value=PlansState.min_score.to_string(),
+                        on_change=PlansState.set_min_score.debounce(500),
+                        type="number",
+                        min="0",
+                        max="100",
+                        step="5",
+                        size="1",
+                        width="72px",
+                    ),
+                    rx.text("分", font_size="0.85em", color=TEXT),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.cond(
+                    PlansState.score_filter & ~PlansState.resume_match,
+                    rx.text(
+                        "请先开启上方的简历技术匹配",
+                        font_size="0.8em",
+                        color="#f79009",
+                    ),
+                ),
+            ),
+            rx.box(
+                cls._field_label("简历附件"),
+                rx.hstack(
+                    rx.input(
+                        value=PlansState.resume_path,
+                        placeholder="尚未上传简历",
+                        read_only=True,
+                        flex="1",
+                        size="3",
+                    ),
+                    rx.upload.root(
+                        rx.button(
+                            rx.icon("upload", size=14),
+                            "上传简历",
+                            variant="outline",
+                            size="3",
+                        ),
+                        id=cls.RESUME_UPLOAD,
+                        accept={"application/pdf": [".pdf"]},
+                        max_files=1,
+                        no_drag=True,
+                        on_drop=PlansState.upload_resume(
+                            rx.upload_files(upload_id=cls.RESUME_UPLOAD)
+                        ),
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+                rx.cond(
+                    PlansState.resume_hint != "",
+                    rx.text(
+                        PlansState.resume_hint,
+                        font_size="0.8em",
+                        color=MUTED,
+                        margin_top="0.35em",
+                    ),
+                ),
+                width="100%",
+            ),
+            rx.box(
+                cls._field_label("简历内容"),
+                rx.text_area(
+                    value=PlansState.resume_text,
+                    on_change=PlansState.set_resume_text.debounce(500),
+                    placeholder="上传后自动识别简历内容，也可以直接粘贴或修改",
+                    width="100%",
+                    min_height="360px",
+                    resize="vertical",
+                ),
+                width="100%",
+            ),
+            width="100%",
+            height="100%",
+            align="start",
+            spacing="5",
             flex="1",
             min_height="0",
             overflow_y="auto",
@@ -427,13 +586,13 @@ class ConfigPage:
         return rx.box(
             cls._industry_select(),
             rx.grid(
-                cls._tag_input("包含关键词", "include_keywords", "输入并回车添加包含词"),
-                cls._tag_input("排除关键词", "exclude_keywords", "输入并回车添加排除词"),
+                cls._tag_input("职位名包含", "include_keywords", "如：Agent，回车添加"),
+                cls._tag_input("职位名排除", "exclude_keywords", "如：实习，回车添加"),
                 cls._tag_input(
-                    "包含公司关键词", "include_companies", "输入并回车添加公司包含词"
+                    "只看这些公司", "include_companies", "如：腾讯，回车添加"
                 ),
                 cls._tag_input(
-                    "排除公司关键词", "exclude_companies", "输入并回车添加公司排除词"
+                    "屏蔽这些公司", "exclude_companies", "如：外包，回车添加"
                 ),
                 columns="2",
                 spacing="4",
@@ -450,10 +609,9 @@ class ConfigPage:
         return rx.box(
             rx.hstack(
                 rx.vstack(
-                    rx.text("AI 岗位意图复核", font_weight="600", color=TEXT),
+                    rx.text("AI 岗位筛选", font_weight="600", color=TEXT),
                     rx.text(
-                        "关键词过滤通过后，再由 DeepSeek 根据岗位职责复核一次；"
-                        "复核不通过或模型异常时跳过该岗位，不入库。",
+                        "AI 阅读岗位职责，只投递符合你求职方向的岗位",
                         font_size="0.8em",
                         color=MUTED,
                     ),
@@ -469,7 +627,7 @@ class ConfigPage:
                 width="100%",
                 margin_bottom="0.85em",
             ),
-            cls._field_label("目标岗位要求"),
+            cls._field_label("求职方向"),
             rx.text_area(
                 value=PlansState.ai_requirement,
                 on_change=PlansState.set_ai_requirement.debounce(500),
@@ -482,7 +640,7 @@ class ConfigPage:
                 width="100%",
             ),
             rx.text(
-                "建议同时写清希望投递和明确排除的岗位方向。",
+                "写清想投的方向和不想投的方向，筛选会更准确",
                 font_size="0.8em",
                 color=MUTED,
                 margin_top="0.35em",
@@ -491,9 +649,9 @@ class ConfigPage:
                 LlmState.key_ready,
                 rx.fragment(),
                 rx.hstack(
-                    rx.text("尚未配置大模型 Key 与模型，", color="#d92d20"),
+                    rx.text("AI 服务尚未开通，", color="#d92d20"),
                     rx.link(
-                        "前往「大模型」填写",
+                        "去开通",
                         on_click=PlansState.set_section("llm"),
                         cursor="pointer",
                     ),
@@ -710,7 +868,7 @@ class ConfigPage:
                     num("scroll_max"), unit("秒"),
                 ),
                 cls._pace_row(
-                    unit("每抓"), num("rest_every", step="1"), unit("条歇"),
+                    unit("每投"), num("rest_every", step="1"), unit("条歇"),
                     num("rest_min"), unit("–"), num("rest_max"),
                     unit("秒（0 条表示不歇）"),
                 ),
@@ -759,9 +917,9 @@ class ConfigPage:
         """大模型：DeepSeek API Key、模型与连接测试。"""
         return rx.vstack(
             rx.vstack(
-                rx.text("大模型", font_weight="700", font_size="1.1em", color=TEXT),
+                rx.text("AI 服务", font_weight="700", font_size="1.1em", color=TEXT),
                 rx.text(
-                    "AI 岗位意图复核使用的模型，所有求职方案共用",
+                    "开通后即可使用 AI 岗位筛选、简历匹配与匹配度分析，所有方案共用",
                     font_size="0.8em",
                     color=MUTED,
                 ),
@@ -776,7 +934,7 @@ class ConfigPage:
                             value=LlmState.api_key,
                             on_change=LlmState.set_api_key.debounce(500),
                             type="password",
-                            placeholder="在 DeepSeek 开放平台创建后粘贴到这里，sk-...",
+                            placeholder="粘贴你的 DeepSeek API Key，以 sk- 开头",
                             width="100%",
                         ),
                         width="100%",
@@ -788,29 +946,29 @@ class ConfigPage:
                                 LlmState.model_options,
                                 value=LlmState.model,
                                 on_change=LlmState.set_model,
-                                placeholder="先拉取最新模型",
+                                placeholder="请先获取模型列表",
                                 disabled=LlmState.model_options.length() == 0,
                                 width="100%",
                             ),
                             cls._llm_button(
-                                "refresh-cw", "拉取最新模型", LlmState.fetch_models
+                                "refresh-cw",
+                                "获取模型列表",
+                                LlmState.fetch_models,
+                                "fetch",
                             ),
                             spacing="2",
                             width="100%",
                         ),
                         width="100%",
                     ),
-                    rx.hstack(
-                        cls._llm_button("plug", "测试连接", LlmState.test_connection),
-                        rx.text(LlmState.hint, font_size="0.8em", color=MUTED),
-                        spacing="3",
-                        align="center",
+                    cls._llm_button(
+                        "plug", "测试连接", LlmState.test_connection, "test"
                     ),
                     spacing="4",
                     width="100%",
                     max_width="560px",
                 ),
-                hint="API Key 只保存在本机数据库；测试会用一个样例岗位真实调用一次",
+                hint="API Key 仅保存在本机，不会上传到任何服务器",
             ),
             width="100%",
             spacing="4",
@@ -819,12 +977,14 @@ class ConfigPage:
         )
 
     @staticmethod
-    def _llm_button(icon: str, label: str, on_click) -> rx.Component:
-        """大模型页的操作按钮；请求进行中时统一禁用。"""
+    def _llm_button(icon: str, label: str, on_click, action: str) -> rx.Component:
+        """大模型页的操作按钮；自己的请求进行中显示加载，其它请求进行中禁用。"""
         return rx.button(
-            rx.hstack(rx.icon(icon, size=16), rx.text(label), spacing="2"),
+            rx.icon(icon, size=16),
+            label,
             on_click=on_click,
-            disabled=LlmState.busy,
+            loading=LlmState.action == action,
+            disabled=LlmState.action != "",
             variant="outline",
             size="2",
             flex_shrink="0",
@@ -902,16 +1062,16 @@ class ConfigPage:
         return rx.dialog.root(
             rx.dialog.content(
                 rx.dialog.title("方案管理"),
-                rx.dialog.description("复制、删除或设为默认；下方可重命名当前方案。"),
+                rx.dialog.description("切换、复制、删除方案，或给当前方案改个名字"),
                 rx.hstack(
                     rx.input(
                         value=PlansState.rename_draft,
                         on_change=PlansState.set_rename_draft,
-                        placeholder="当前方案新名称",
+                        placeholder="输入新名称",
                         width="100%",
                     ),
                     rx.button(
-                        "重命名当前", on_click=PlansState.rename_active, size="2"
+                        "重命名", on_click=PlansState.rename_active, size="2"
                     ),
                     width="100%",
                     spacing="2",

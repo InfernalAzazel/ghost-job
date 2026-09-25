@@ -174,3 +174,23 @@ def test_update_filters_rejects_unknown_list_field(tmp_db: Path):
     active = SearchPlanRow.get_active_dict()
     with pytest.raises(TypeError):
         SearchPlanRow.update_filters(active["id"], bogus=["x"])
+
+
+def test_resume_persist_and_copy(tmp_db: Path):
+    active = SearchPlanRow.get_active_dict()
+    assert active["resume_text"] == "" and active["resume_match"] is False
+    assert active["score_filter"] is False and active["min_score"] == 60
+    SearchPlanRow.update_filters(
+        active["id"],
+        resume_match=True,
+        score_filter=True,
+        min_score=75,
+        resume_path="/tmp/cv.pdf",
+        resume_text="张三 Agent 工程师",
+    )
+    refreshed = SearchPlanRow.get_active_dict()
+    assert refreshed["resume_path"] == "/tmp/cv.pdf"
+    copied = SearchPlanRow.create("复制简历")
+    assert copied["resume_text"] == "张三 Agent 工程师"
+    assert copied["resume_match"] is True
+    assert copied["score_filter"] is True and copied["min_score"] == 75

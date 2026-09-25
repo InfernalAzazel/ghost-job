@@ -1,4 +1,4 @@
-"""BOSS 职位抓取：逐个点击卡片，从接口响应提取信息与详情，存入数据库。"""
+"""BOSS 自动投递：逐个点击卡片取详情，筛选复核通过后点「立即沟通」投递并入库。"""
 
 from __future__ import annotations
 
@@ -35,10 +35,6 @@ if TYPE_CHECKING:
 
     from job.boss.review import JobReviewer
     from job.boss.session import BossSession
-
-DEFAULT_SEARCH_URL = (
-    f"{BASE_URL}/web/geek/jobs?city=101280100&jobType=1901&query=ai应用开发"
-)
 
 # 字体加密字符（Unicode 私用区）
 _ENCRYPTED = re.compile(r"[\ue000-\uf8ff]")
@@ -127,12 +123,22 @@ class Job(BaseModel):
 
 
 class JobScraper:
-    """在 BossSession 的页面上抓取：点击卡片 → 取详情 → 入库。"""
+    """在 BossSession 的页面上自动投递：点击卡片 → 取详情 → 复核 → 立即沟通 → 入库。"""
 
     # 列表卡片
     CARD = "li.job-card-box, .job-card-wrapper"
     # 登录弹层
     LOGIN = ".login-dialog-wrap"
+    # 右侧详情里的沟通按钮（未沟通过显示「立即沟通」，沟通过显示「继续沟通」）
+    CHAT_BTN = ".job-detail-box .op-btn-chat, .job-detail-container .op-btn-chat"
+    # 点「立即沟通」后弹窗里的「留在此页」
+    STAY = re.compile(r"^\s*留在此页")
+    # 弹窗容器
+    DIALOG = "[class*='dialog']"
+    # 当日投递次数用完的弹窗文案
+    LIMIT = re.compile(r"上限|明天再来")
+    # 每日投递上限
+    DAILY_LIMIT = 150
     # 列表接口 URL 特征
     LIST_API = "joblist.json"
     # 详情接口 URL 特征
@@ -148,16 +154,18 @@ class JobScraper:
         self._keywords = KeywordFilter()
         self._reviewer: JobReviewer | None = None
         self._saved = 0
+        self._today = 0
+        self._limit_hit = False
         self._day_factor = 1.0
         self._on_log: LogSink | None = None
 
     def request_stop(self) -> None:
-        """请求停止当前抓取。"""
+        """请求停止当前投递。"""
         self._stop.set()
 
     async def search(
         self,
-        url: str | None = None,
+        url: str,
         *,
         pace: PaceProfile | None = None,
         keywords: KeywordFilter | None = None,
@@ -165,11 +173,12 @@ class JobScraper:
         on_job: Callable[[Job], Awaitable[None]] | None = None,
         on_log: LogSink | None = None,
     ) -> tuple[str, list[Job], str]:
-        """按节奏 ``pace`` 抓取搜索页，``keywords`` 不符合的卡片跳过不点开。
+        """按节奏 ``pace`` 在搜索页自动投递，``keywords`` 不符合的卡片跳过不点开。
 
-        传了 ``reviewer`` 时，点开详情后再做一次 AI 复核，不通过的不入库。
+        传了 ``reviewer`` 时，点开详情后再做一次 AI 复核，不通过的不投递。
+        只有投递成功的岗位入库，下次直接跳过；每天最多投递 ``DAILY_LIMIT`` 次。
         过程日志交给 ``on_log``（不打印到终端）。
-        返回 (最终 URL, 职位列表, 状态)；状态为 done / stopped / need_login。
+        返回 (最终 URL, 职位列表, 状态)；状态为 done / stopped / need_login / limit。
         """
         self._stop.clear()
         self._listed.clear()
@@ -178,13 +187,17 @@ class JobScraper:
         self._reviewer = reviewer
         self._on_log = on_log
         self._saved = 0
+        self._limit_hit = False
+        self._today = JobRow.count_today()
+        await self._log(f"今日已投递 {self._today} / {self.DAILY_LIMIT}")
+        if self._today >= self.DAILY_LIMIT:
+            return url, [], "limit"
         self._day_factor = PaceProfile.daily_factor(str(self.session.user_data_dir))
-        await self._log(f"今日节奏系数 ×{self._day_factor:.2f}")
         page = await self.session.page()
 
         page.on("response", self._on_list_response)
         try:
-            await page.goto(url or DEFAULT_SEARCH_URL, wait_until="domcontentloaded")
+            await page.goto(url, wait_until="domcontentloaded")
             try:
                 await page.wait_for_selector(self.CARD, timeout=20_000)
             except PlaywrightTimeoutError:
@@ -202,7 +215,7 @@ class JobScraper:
                     break
                 await self._load_more(page)
                 await self._pause(self._pace.scroll)
-            return page.url, jobs, "stopped" if self._stop.is_set() else "done"
+            return page.url, jobs, self._end_state()
         finally:
             page.remove_listener("response", self._on_list_response)
 
@@ -212,7 +225,10 @@ class JobScraper:
         done: set[str],
         on_job: Callable[[Job], Awaitable[None]] | None,
     ) -> list[Job]:
-        """逐个处理当前可见、未看过的卡片：不符合关键词就跳过，否则点开取详情并入库。"""
+        """逐个处理当前可见、未看过的卡片。
+
+        已在库中或不符合关键词的跳过不点开，其余点开取详情、复核后投递并入库。
+        """
         cards = page.locator(self.CARD)
         batch: list[Job] = []
         for i in range(await cards.count()):
@@ -223,31 +239,81 @@ class JobScraper:
             if job is None or job.job_id in done:
                 continue
             done.add(job.job_id)
+            if JobRow.exists(job):
+                await self._log(f"{job.title} · {job.company}（已在库中）", "skip")
+                continue
             if reason := self._keywords.reject_reason(job.title, job.company):
                 await self._log(f"{job.title} · {job.company}（{reason}）", "skip")
                 continue
 
             job = await self._open_detail(page, card, job)
-            if self._reviewer and (reason := await self._reviewer.reject_reason(job)):
+            reason, score = "", None
+            if self._reviewer:
+                reason, score = await self._reviewer.check(job)
+            if reason:
                 await self._log(f"{job.title} · {job.company}（{reason}）", "skip")
                 await self._pause(self._pace.read)
                 continue
-            JobRow.upsert_from(job)
+
+            await self._pause(self._pace.read)
+            status = await self._apply(page)
+            if status:
+                level = "warn" if self._limit_hit else "skip"
+                await self._log(f"{job.title} · {job.company}（{status}）", level)
+                continue
+            JobRow.upsert_from(job, score)
             batch.append(job)
             self._saved += 1
+            self._today += 1
             salary = job.salary or "薪资未知"
-            await self._log(f"{job.title} · {job.company} · {salary}", "ok")
+            match = "" if score is None else f" · 匹配 {score} 分"
+            await self._log(f"{job.title} · {job.company} · {salary}{match}", "ok")
             if on_job is not None:
                 await on_job(job)
+            if self._today >= self.DAILY_LIMIT:
+                self._hit_limit()
+                break
             await self._rest_after(self._saved)
         return batch
 
+    async def _apply(self, page: Page) -> str:
+        """点右侧详情的「立即沟通」，再点弹窗里的「留在此页」。
+
+        投递成功返回空串，否则返回原因；弹出次数上限对话框时同时停止投递。
+        """
+        button = page.locator(self.CHAT_BTN).first
+        limit = page.locator(self.DIALOG).filter(has_text=self.LIMIT)
+        stay = page.get_by_text(self.STAY)
+        try:
+            text = (await button.inner_text(timeout=5_000)).strip()
+            if text != "立即沟通":
+                return "此前已沟通" if "继续" in text else f"沟通按钮为「{text}」"
+            await button.click(timeout=5_000)
+            await stay.or_(limit).first.wait_for(timeout=8_000)
+            if await limit.first.is_visible():
+                self._hit_limit()
+                return "今日投递次数已达上限，停止投递"
+            await stay.first.click(timeout=5_000)
+        except PlaywrightError as exc:
+            return f"投递失败：{str(exc).splitlines()[0]}"
+        return ""
+
+    def _hit_limit(self) -> None:
+        """达到每日投递上限：停止投递。"""
+        self._limit_hit = True
+        self._stop.set()
+
+    def _end_state(self) -> str:
+        if self._limit_hit:
+            return "limit"
+        return "stopped" if self._stop.is_set() else "done"
+
     async def _rest_after(self, count: int) -> None:
-        """看完一条后停顿；每满 ``rest_every`` 条再多歇一会。"""
+        """投递一条后停顿；每满 ``rest_every`` 条再多歇一会。"""
         await self._pause(self._pace.read)
         every = self._pace.rest_every
         if every and count % every == 0:
-            await self._log(f"已入库 {count} 条，休息一会")
+            await self._log(f"已投递 {count} 条，休息一会")
             await self._pause(self._pace.rest)
 
     async def _log(self, text: str, level: str = "info") -> None:
