@@ -1,33 +1,126 @@
-# ghost-job
+<div align="center">
 
-Reflex UI + Patchright（本机 Chrome）抓取 BOSS 直聘列表与详情。
+<img src="assets/icon.png" width="96" alt="Ghost Job" />
 
-## 结构
+# Ghost Job
 
-```text
-job/
-  __main__.py
-  ui/             # Reflex 页面
-  boss/           # BOSS 抓取
-  models/         # 表定义 + 引擎 + CRUD
-```
+**你的 BOSS 直聘智能投递助手**
 
-## 开发
+按你的求职方向自动筛选岗位，AI 对比简历判断匹配度，只把简历投给真正合适的公司。
 
-按 [reflex-desktop](https://github.com/FarhanAliRaza/reflex-desktop) 文档，日常迭代用 **`reflex-desktop dev`**（原生窗口 + 热重载）：
+[下载安装](https://github.com/InfernalAzazel/ghost-job/releases) · [快速开始](#快速开始) · [常见问题](#常见问题)
+
+</div>
+
+![工作台](assets/screenshots/workbench.png)
+
+## 为什么用 Ghost Job
+
+每天刷几百个岗位、逐个点开看职责、再挨个点「立即沟通」——这些重复劳动交给 Ghost Job。
+
+- **自动投递**：按求职方案逐个查看岗位，符合条件就替你向 HR 打招呼，全程无需守在电脑前
+- **AI 岗位筛选**：AI 阅读岗位职责，只投递符合你求职方向的岗位，销售、外包等一律避开
+- **简历技术匹配**：上传简历后，AI 对比岗位技术要求与你的技能，给出 0–100 的匹配度
+- **匹配度过滤**：只投递匹配度达标的岗位，把每天有限的沟通次数花在刀刃上
+- **像真人一样投递**：随机停顿、分批休息，每天节奏略有不同，降低账号风险
+- **数据只在本机**：岗位记录、简历、API Key 全部保存在你自己的电脑上
+
+## 快速开始
+
+### 准备工作
+
+1. 从 [Releases](https://github.com/InfernalAzazel/ghost-job/releases) 下载对应系统的安装包并安装
+   - Windows：`.msi` 或 `.exe`
+   - macOS：`.dmg`（Apple 芯片选 `aarch64`，Intel 选 `x64`）
+   - Linux：`.AppImage` / `.deb` / `.rpm`
+2. 安装 [Google Chrome](https://www.google.com/chrome/)（自动投递通过本机 Chrome 完成）
+3. 准备一个 [DeepSeek API Key](https://platform.deepseek.com/api_keys)
+
+### 第一步：开通 AI 服务
+
+打开 **配置中心 → AI 服务**：
+
+1. 粘贴 DeepSeek API Key
+2. 点击「获取模型列表」，选择一个模型
+3. 点击「测试连接」，看到「连接成功」即可
+
+![AI 服务](assets/screenshots/config-ai.png)
+
+### 第二步：设置求职方案
+
+打开 **配置中心 → 求职方案 → 岗位筛选**，告诉 Ghost Job 你想找什么工作：
+
+- **基础条件**：岗位关键词、目标城市、求职类型、薪资范围
+- **经验 / 学历 / 公司**：工作经验、学历、融资阶段、企业规模
+- **行业与关键词**：只看感兴趣的行业；用「职位名排除」「屏蔽这些公司」避开不想要的岗位
+- **AI 岗位筛选**（可选）：用一句话写清想投和不想投的方向，AI 帮你把关
+- **投递节奏**：慢速 / 正常 / 快速，或自定义每条之间的停顿
+
+所有修改自动保存。可以为不同求职方向准备多套方案，随时切换。
+
+![岗位筛选](assets/screenshots/config-filters.png)
+
+### 第三步：上传简历
+
+切到 **简历配置**：
+
+1. 点击「上传简历」选择 PDF，内容会自动识别，也可以直接粘贴修改
+2. 打开「简历技术匹配」，投递前 AI 会对比岗位要求与你的技能
+3. 需要更严格时，打开「匹配度过滤」并设置最低分数（默认 60 分）
+
+![简历配置](assets/screenshots/config-resume.png)
+
+### 第四步：开始自动投递
+
+回到 **工作台**，点击「开始自动投递」：
+
+1. 首次使用会打开 Chrome，请在里面登录 BOSS 直聘，登录一次即可长期保持
+2. Ghost Job 会按方案逐个查看岗位，符合条件的自动点击「立即沟通」
+3. 运行日志实时显示每个岗位的处理结果；随时可以点击「停止」
+
+每天最多投递 150 次，达到上限后会自动停止，第二天继续。
+
+### 第五步：查看与分析岗位
+
+打开 **岗位管理** 查看所有投递过的岗位：
+
+- 按「已分析 / 未分析 / 高匹配」筛选，搜索岗位或公司
+- 勾选岗位后点击「AI 分析」，批量评估匹配度
+- 查看岗位详情，或批量删除不需要的记录
+
+![岗位管理](assets/screenshots/jobs.png)
+
+## 常见问题
+
+**会重复投递同一个岗位吗？**
+不会。投递成功的岗位会记录下来，下次自动跳过；之前已经沟通过的岗位也会跳过。
+
+**为什么有岗位被跳过了？**
+运行日志会写明原因，例如不符合关键词、AI 判断方向不符、匹配度不足或此前已沟通。
+
+**每天能投多少个？**
+BOSS 直聘每天约 150 次沟通上限，Ghost Job 会在达到上限时自动停止。
+
+**macOS 提示「无法验证开发者」怎么办？**
+在应用上右键选择「打开」，或前往「系统设置 → 隐私与安全性」点击「仍要打开」。
+
+**我的数据存在哪里？**
+全部在本机 `~/.ghost-job/` 目录：岗位与配置在 `ghost-job.db`，简历在 `resumes/`，Chrome 登录状态在 `chrome-profile/`。
+
+## 参与开发
+
+基于 [Reflex](https://reflex.dev) + [reflex-desktop](https://github.com/FarhanAliRaza/reflex-desktop)（Tauri）构建，浏览器自动化使用 [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)，AI 能力基于 [Pydantic AI](https://ai.pydantic.dev)。
 
 ```bash
 uv sync
-# 前置：较新的 Rust（建议 rustup 稳定版 ≥1.85）、Xcode CLT、Tauri CLI
-cargo install tauri-cli --locked   # 仅首次 / doctor --bundle 提示时
+# 前置：Rust（rustup 稳定版）、Tauri CLI（cargo install tauri-cli --locked）
 uv run reflex-desktop doctor --bundle
-uv run python -m job               # 等价于 reflex-desktop dev
-# 仅浏览器调试：uv run reflex run
+uv run python -m job        # 桌面窗口 + 热重载
+uv run pytest -q            # 运行测试
 ```
 
-1. 安装 Google Chrome
-2. 桌面窗口打开后 →「打开 BOSS」→ 在弹出的 Chrome 登录
-3. 「抓列表+详情」滚动加载；「停止」结束本卡后退出
+推送 `v*` 标签后，GitHub Actions 会自动打包 Windows / macOS / Linux 安装包并发布到 Releases。
 
-Profile：`~/.ghost-job/chrome-profile`  
-SQLite：`~/.ghost-job/ghost-job.db`
+## 许可证
+
+[LICENSE](LICENSE)
