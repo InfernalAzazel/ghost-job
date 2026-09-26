@@ -11,7 +11,7 @@ from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
 
 
 class WorkbenchPage:
-    """工作台：自动投递控制与运行日志。"""
+    """工作台：自动投递、自动回复的开关与运行日志。"""
 
     @classmethod
     def create(cls) -> rx.Component:
@@ -71,17 +71,61 @@ class WorkbenchPage:
             box_shadow="0 1px 2px rgba(16,24,40,0.04)",
         )
 
+    @staticmethod
+    def _status_row(label: str, state: rx.Var, running: rx.Var) -> rx.Component:
+        return rx.hstack(
+            rx.text(label, font_size="0.85em", color=MUTED),
+            rx.spacer(),
+            rx.badge(
+                state,
+                color_scheme=rx.cond(running, "green", "gray"),
+                variant="soft",
+            ),
+            width="100%",
+            align="center",
+        )
+
+    @staticmethod
+    def _toggle_button(
+        *,
+        running: rx.Var,
+        stopping: rx.Var,
+        icon: str,
+        start_label: str,
+        stop_label: rx.Var | str,
+        on_start,
+        on_stop,
+    ) -> rx.Component:
+        """开始 / 停止合一的按钮：运行中变成停止，停止中禁用。"""
+        return rx.cond(
+            running,
+            rx.button(
+                rx.icon("circle-stop", size=16),
+                rx.cond(stopping, "正在停止…", stop_label),
+                on_click=on_stop,
+                disabled=stopping,
+                color_scheme="red",
+                variant="soft",
+                width="100%",
+                size="3",
+            ),
+            rx.button(
+                rx.icon(icon, size=16),
+                start_label,
+                on_click=on_start,
+                width="100%",
+                size="3",
+                style={"background": ACCENT, "color": "white"},
+            ),
+        )
+
     @classmethod
     def _platform_panel(cls) -> rx.Component:
-        status_hint = rx.cond(
-            BossState.busy,
-            "正在为你投递，可随时停止",
-            "准备好后点击下方按钮开始，浏览器会自动打开",
-        )
+        running = BossState.busy | BossState.reply_busy
         return rx.box(
-            rx.heading("自动投递", size="5", color=TEXT),
+            rx.heading("求职助手", size="5", color=TEXT),
             rx.text(
-                "按求职配置智能筛选合适的岗位，自动替你向 HR 打招呼。",
+                "按求职配置筛选合适的岗位替你打招呼，HR 发来消息时由 AI 结合简历替你回复。",
                 color=MUTED,
                 font_size="0.85em",
                 margin_top="0.35em",
@@ -97,67 +141,60 @@ class WorkbenchPage:
             ),
             rx.box(
                 rx.vstack(
-                    rx.text("当前状态", font_size="0.8em", color=MUTED),
+                    cls._status_row("投递", BossState.boss_state, BossState.busy),
+                    cls._status_row("回复", BossState.reply_state, BossState.reply_busy),
                     rx.text(
-                        BossState.boss_state,
-                        font_weight="600",
-                        font_size="0.95em",
-                        color=TEXT,
+                        rx.cond(
+                            running,
+                            "运行中请保持浏览器打开，投递和回复可以同时进行",
+                            "点击下方按钮开始，首次使用需在打开的浏览器里登录 BOSS 直聘",
+                        ),
+                        font_size="0.78em",
+                        color=MUTED,
                     ),
-                    rx.text(status_hint, font_size="0.8em", color=MUTED),
                     align="start",
-                    spacing="1",
+                    spacing="2",
                     width="100%",
                 ),
                 bg="#F8FAFC",
                 border=f"1px solid {BORDER}",
                 border_radius="12px",
-                padding="1em",
+                padding="0.9em 1em",
                 margin_top="1em",
                 flex_shrink="0",
             ),
             rx.vstack(
+                cls._toggle_button(
+                    running=BossState.busy,
+                    stopping=BossState.boss_state == "停止中",
+                    icon="send",
+                    start_label="开始自动投递",
+                    stop_label=f"停止投递（本次已投 {BossState.session_count} 个）",
+                    on_start=BossState.start_apply,
+                    on_stop=BossState.stop_apply,
+                ),
+                cls._toggle_button(
+                    running=BossState.reply_busy,
+                    stopping=BossState.reply_state == "停止中",
+                    icon="message-circle",
+                    start_label="开始自动回复",
+                    stop_label=f"停止回复（本次已回 {BossState.reply_count} 条）",
+                    on_start=BossState.start_reply,
+                    on_stop=BossState.stop_reply,
+                ),
                 rx.button(
-                    rx.icon("send", size=16),
-                    "开始自动投递",
-                    on_click=BossState.start_apply,
-                    disabled=BossState.busy,
+                    rx.icon("power", size=16),
+                    "关闭浏览器",
+                    on_click=BossState.close_boss,
+                    variant="outline",
                     width="100%",
                     size="3",
-                    style={
-                        "background": ACCENT,
-                        "color": "white",
-                        "_disabled": {
-                            "background": "var(--gray-a3)",
-                            "color": "var(--gray-a8)",
-                            "cursor": "not-allowed",
-                        },
-                    },
-                ),
-                rx.hstack(
-                    rx.button(
-                        "停止",
-                        on_click=BossState.stop_apply,
-                        disabled=BossState.busy == False,
-                        color_scheme="red",
-                        variant="soft",
-                        flex="1",
-                    ),
-                    rx.button(
-                        "关闭浏览器",
-                        on_click=BossState.close_boss,
-                        variant="outline",
-                        flex="1",
-                    ),
-                    width="100%",
-                    spacing="2",
                 ),
                 spacing="2",
                 width="100%",
                 margin_top="1.1em",
                 flex_shrink="0",
             ),
-            cls._reply_section(),
             bg=CARD,
             border=f"1px solid {BORDER}",
             border_radius="16px",
@@ -168,53 +205,6 @@ class WorkbenchPage:
             height="100%",
             overflow_y="auto",
             box_shadow="0 1px 2px rgba(16,24,40,0.04)",
-        )
-
-    @staticmethod
-    def _reply_section() -> rx.Component:
-        """自动回复：状态 + 开始 / 停止；和投递共用浏览器，可同时进行。"""
-        return rx.box(
-            rx.hstack(
-                rx.heading("自动回复", size="4", color=TEXT),
-                rx.spacer(),
-                rx.badge(
-                    BossState.reply_state,
-                    color_scheme=rx.cond(BossState.reply_busy, "green", "gray"),
-                    variant="soft",
-                ),
-                align="center",
-                width="100%",
-            ),
-            rx.text(
-                "HR 发来消息时，由 AI 结合简历按回复节奏自动回复，可与投递同时进行。",
-                color=MUTED,
-                font_size="0.85em",
-                margin_top="0.35em",
-            ),
-            rx.cond(
-                BossState.reply_busy,
-                rx.button(
-                    rx.icon("circle-stop", size=16),
-                    f"停止自动回复（已回复 {BossState.reply_count} 条）",
-                    on_click=BossState.stop_reply,
-                    color_scheme="red",
-                    variant="soft",
-                    width="100%",
-                    margin_top="0.85em",
-                ),
-                rx.button(
-                    rx.icon("message-circle", size=16),
-                    "开始自动回复",
-                    on_click=BossState.start_reply,
-                    variant="outline",
-                    width="100%",
-                    margin_top="0.85em",
-                ),
-            ),
-            margin_top="1.25em",
-            padding_top="1.1em",
-            border_top=f"1px solid {BORDER}",
-            flex_shrink="0",
         )
 
     @staticmethod
@@ -299,7 +289,7 @@ class WorkbenchPage:
                     rx.hstack(
                         rx.icon("info", size=16, color=ACCENT),
                         rx.text(
-                            "暂无日志，开始投递后会显示在这里",
+                            "暂无日志，开始投递或自动回复后会显示在这里",
                             font_size="0.85em",
                             color=ACCENT,
                         ),
