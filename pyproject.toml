@@ -1,6 +1,6 @@
 [project]
 name = "ghost-job"
-version = "0.2.0"
+version = "0.3.0"
 description = "Ghost Job — Reflex UI + Patchright BOSS scraper"
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"
