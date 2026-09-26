@@ -5,8 +5,6 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
-from sqlalchemy import Engine, inspect, text
-from sqlalchemy.schema import CreateColumn
 from sqlmodel import Session, SQLModel, create_engine
 
 DATA_DIR = Path.home() / ".ghost-job"
@@ -28,7 +26,7 @@ def get_engine():
     if _engine is not None:
         return _engine
 
-    for mod in ("job.models.job", "job.models.plan", "job.models.setting"):
+    for mod in ("job.models.job", "job.models.search", "job.models.setting"):
         importlib.import_module(mod)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -37,20 +35,7 @@ def get_engine():
         connect_args={"check_same_thread": False},
     )
     SQLModel.metadata.create_all(_engine)
-    _add_missing_columns(_engine)
     return _engine
-
-
-def _add_missing_columns(engine: Engine) -> None:
-    """老库补列：模型新增的字段按 ``ALTER TABLE ADD COLUMN`` 追加。"""
-    inspector = inspect(engine)
-    with engine.begin() as conn:
-        for table in SQLModel.metadata.sorted_tables:
-            existing = {c["name"] for c in inspector.get_columns(table.name)}
-            for column in table.columns:
-                if column.name not in existing:
-                    ddl = CreateColumn(column).compile(engine)
-                    conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {ddl}"))
 
 
 def db_session() -> Session:
@@ -59,8 +44,7 @@ def db_session() -> Session:
 
 
 def init_db() -> None:
-    """建表，并确保有默认求职方案。"""
-    from job.models.plan import SearchPlanRow
+    """建表，并确保有求职配置。"""
+    from job.models.search import SearchConfigRow
 
-    get_engine()
-    SearchPlanRow.ensure_default()
+    SearchConfigRow.ensure()

@@ -27,20 +27,20 @@ def test_presets_differ_in_speed():
     assert "歇" not in fast.describe()
 
 
-def test_from_plan_reads_custom_params():
-    plan = {"pace": "custom", "pace_params": {"read_min": 10, "read_max": 20}}
-    pace = PaceProfile.from_plan(plan)
+def test_from_config_reads_custom_params():
+    config = {"pace": "custom", "pace_params": {"read_min": 10, "read_max": 20}}
+    pace = PaceProfile.from_config(config)
     assert pace.read == (10, 20)
     assert pace.scroll == PaceProfile().scroll
 
 
-def test_from_plan_ignores_params_for_presets_and_bad_custom():
+def test_from_config_ignores_params_for_presets_and_bad_custom():
     params = {"read_min": 10}
-    assert PaceProfile.from_plan({"pace": "fast", "pace_params": params}) == (
+    assert PaceProfile.from_config({"pace": "fast", "pace_params": params}) == (
         PaceProfile.preset("fast")
     )
     bad = {"pace": "custom", "pace_params": {"read_min": -1}}
-    assert PaceProfile.from_plan(bad) == PaceProfile()
+    assert PaceProfile.from_config(bad) == PaceProfile()
 
 
 def test_daily_factor_stable_within_day_and_varies_across_days():

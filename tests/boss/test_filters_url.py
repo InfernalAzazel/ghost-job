@@ -16,7 +16,7 @@ from job.boss.filters import (
 
 
 def test_search_url_minimal():
-    url = SearchUrl.build({"query": "Agent 工程师", "city_code": City.code("惠州")})
+    url = SearchUrl.build({"query": "Agent 工程师"}, "惠州")
     parsed = urlparse(url)
     assert parsed.path.endswith("/web/geek/jobs")
     qs = parse_qs(parsed.query)
@@ -29,18 +29,18 @@ def test_search_url_full_filters():
     url = SearchUrl.build(
         {
             "query": "ai应用开发",
-            "city_code": Defaults.CITY_CODE,
             "job_type": "1901",
             "salary": "406",
             "experience": ["1-3年", "3-5年"],
             "education": ["本科"],
             "funding": ["A轮"],
             "scale": ["20-99人", "100-499人"],
-        }
+        },
+        "广州",
     )
     qs = parse_qs(urlparse(url).query)
     assert qs["query"] == ["ai应用开发"]
-    assert qs["city"] == [Defaults.CITY_CODE]
+    assert qs["city"] == [City.code("广州")]
     assert qs["jobType"] == ["1901"]
     assert qs["salary"] == ["406"]
     assert qs["experience"] == [
@@ -55,21 +55,35 @@ def test_search_url_ignores_blank_multiselect_labels():
     url = SearchUrl.build(
         {
             "query": "x",
-            "city_code": "101280100",
             "experience": ["不限", "未知标签"],
-        }
+        },
+        "广州",
     )
     qs = parse_qs(urlparse(url).query)
     assert "experience" not in qs
 
 
 def test_search_url_industry_codes():
-    url = SearchUrl.build({"query": "ai", "industry": ["互联网", "人工智能", "未知"]})
+    url = SearchUrl.build(
+        {"query": "ai", "industry": ["互联网", "人工智能", "未知"]}, "广州"
+    )
     qs = parse_qs(urlparse(url).query)
     assert qs["industry"] == [
         f"{Industry.code('互联网')},{Industry.code('人工智能')}"
     ]
     assert Industry.code("互联网") == "100020"
+
+
+def test_search_url_by_city_keeps_order():
+    targets = SearchUrl.by_city({"query": "ai", "cities": ["深圳", "未知城市", "惠州"]})
+    assert [city for city, _ in targets] == ["深圳", "惠州"]
+    for city, url in targets:
+        qs = parse_qs(urlparse(url).query)
+        assert qs["city"] == [City.code(city)] and qs["query"] == ["ai"]
+
+
+def test_search_url_by_city_defaults():
+    assert [city for city, _ in SearchUrl.by_city({"query": "ai"})] == list(Defaults.CITIES)
 
 
 def test_keyword_filter_rules():
@@ -86,9 +100,9 @@ def test_keyword_filter_rules():
     assert KeywordFilter().reject_reason("任意", "任意") == ""
 
 
-def test_keyword_filter_from_plan():
-    plan = {"include_keywords": ["agent"], "exclude_companies": ["外包"]}
-    kw = KeywordFilter.from_plan(plan)
+def test_keyword_filter_from_config():
+    config = {"include_keywords": ["agent"], "exclude_companies": ["外包"]}
+    kw = KeywordFilter.from_config(config)
     assert kw.include == ["agent"]
     assert kw.exclude_companies == ["外包"]
     assert kw.exclude == []

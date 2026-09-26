@@ -8,13 +8,13 @@ import reflex as rx
 from patchright.async_api import Error as PlaywrightError
 from sqlalchemy.exc import SQLAlchemyError
 
-from job.boss.filters import City, KeywordFilter, PaceProfile, SearchUrl
+from job.boss.filters import KeywordFilter, PaceProfile, SearchUrl
 from job.boss.jobs import JobScraper
 from job.boss.review import JobReviewer
 from job.boss.session import BossSession
 from job.models import init_db
 from job.models.job import JobRow
-from job.models.plan import SearchPlanRow
+from job.models.search import SearchConfigRow
 from job.models.setting import LlmSettings
 
 _session = BossSession()
@@ -29,7 +29,7 @@ _STATUS = {
 }
 # 投递结束状态 → 日志文案
 _FINISHED = {
-    "done": "投递完成",
+    "done": "所选城市的岗位都看完了",
     "stopped": "已停止投递",
     "need_login": "需要登录 BOSS，请在浏览器里登录后重新开始",
     "limit": "今日投递次数已用完，明天再来",
@@ -41,29 +41,33 @@ _MAX_LOG = 200
 class BossState(rx.State):
     boss_state: str = "空闲"
     busy: bool = False
-    # 运行日志（新的在前）：{time, level, text}，level 为 info / ok / skip / warn
+    # 运行日志（新的在前）：{time, level, text}，level 为 info / ok / dup / skip / warn
     log: list[dict[str, str]] = rx.field(default_factory=list)
     stored_count: int = 0
     session_count: int = 0
-    active_plan_name: str = ""
+    # 本次投递中遇到的重复岗位数与跳过岗位数
+    dup_count: int = 0
+    skip_count: int = 0
+    # 目标城市（顿号分隔，工作台展示用）
+    target_cities: str = ""
 
     def _push_log(self, text: str, level: str = "info") -> None:
         """追加一条运行日志。"""
-        now = datetime.now().strftime("%H:%M:%S")
+        now = datetime.now().astimezone().strftime("%H:%M:%S")
         self.log = [{"time": now, "level": level, "text": text}, *self.log][:_MAX_LOG]
 
     def _refresh_stored_count(self) -> None:
-        self.stored_count = JobRow.count()
+        self.stored_count = JobRow.count_applied()
 
-    def _refresh_active_plan_name(self) -> None:
-        plan = SearchPlanRow.get_active_dict()
-        self.active_plan_name = str(plan.get("name") or "")
+    def _refresh_target_cities(self) -> None:
+        targets = SearchUrl.by_city(SearchConfigRow.load())
+        self.target_cities = "、".join(city for city, _ in targets)
 
     @rx.event
     def on_load(self):
         init_db()
         self._refresh_stored_count()
-        self._refresh_active_plan_name()
+        self._refresh_target_cities()
         if not self.log:
             self._push_log(f"已就绪，累计投递 {self.stored_count} 个岗位")
 
@@ -86,22 +90,22 @@ class BossState(rx.State):
 
     @rx.event(background=True)
     async def start_apply(self):
-        """按当前方案自动投递；浏览器未打开时自动打开。"""
+        """按求职配置逐个城市自动投递；浏览器未打开时自动打开。"""
         async with self:
             if self.busy:
                 return
-            plan = SearchPlanRow.get_active_dict()
-            query = str(plan.get("query") or "").strip()
+            config = SearchConfigRow.load()
+            query = str(config.get("query") or "").strip()
             if not query:
                 self._push_log("请先在配置中心填写岗位关键词", "warn")
-                self.boss_state = "待完善方案"
+                self.boss_state = "待完善配置"
                 return
-            url = SearchUrl.build(plan)
-            pace = PaceProfile.from_plan(plan)
-            keywords = KeywordFilter.from_plan(plan)
-            reviewer = JobReviewer.from_plan(plan, LlmSettings.load())
-            resume = str(plan.get("resume_text") or "").strip()
-            if plan.get("resume_match") and not resume:
+            targets = SearchUrl.by_city(config)
+            pace = PaceProfile.from_config(config)
+            keywords = KeywordFilter.from_config(config)
+            reviewer = JobReviewer.from_config(config, LlmSettings.load())
+            resume = str(config.get("resume_text") or "").strip()
+            if config.get("resume_match") and not resume:
                 self._push_log(
                     "已开启简历技术匹配，请先在「简历配置」上传简历", "warn"
                 )
@@ -120,11 +124,10 @@ class BossState(rx.State):
             self.busy = True
             self.boss_state = "准备中"
             self.session_count = 0
-            self.active_plan_name = str(plan.get("name") or "")
-            city = City.label(str(plan.get("city_code") or ""))
-            self._push_log(
-                f"开始自动投递「{self.active_plan_name}」：{query} · {city}"
-            )
+            self.dup_count = 0
+            self.skip_count = 0
+            self.target_cities = "、".join(city for city, _ in targets)
+            self._push_log(f"开始自动投递：{query} · {self.target_cities}")
             self._push_log(f"投递节奏：{pace.describe()}")
             if not _session.is_open:
                 self._push_log("正在打开浏览器…")
@@ -141,11 +144,15 @@ class BossState(rx.State):
             async with self:
                 if self.boss_state == "准备中":
                     self.boss_state = "投递中"
+                if level == "dup":
+                    self.dup_count += 1
+                elif level == "skip":
+                    self.skip_count += 1
                 self._push_log(text, level)
 
         try:
-            _url, _jobs, state = await _scraper.search(
-                url,
+            _jobs, state = await _scraper.search(
+                targets,
                 pace=pace,
                 keywords=keywords,
                 reviewer=reviewer,
@@ -157,6 +164,7 @@ class BossState(rx.State):
                 self._refresh_stored_count()
                 self._push_log(
                     f"{_FINISHED.get(state, state)}：本次投递 {self.session_count} 条，"
+                    f"重复 {self.dup_count} 条，跳过 {self.skip_count} 条，"
                     f"累计投递 {self.stored_count} 条",
                     "warn" if state in ("need_login", "limit") else "info",
                 )

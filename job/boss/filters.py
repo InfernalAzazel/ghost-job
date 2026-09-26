@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Mapping, Sequence
-from datetime import date
+from datetime import date, datetime
 from typing import Any, ClassVar
 from urllib.parse import urlencode
 
@@ -168,13 +168,13 @@ class KeywordFilter(BaseModel):
     exclude_companies: list[str] = []
 
     @classmethod
-    def from_plan(cls, plan: Mapping[str, Any]) -> KeywordFilter:
-        """从方案字典取四组关键词。"""
+    def from_config(cls, config: Mapping[str, Any]) -> KeywordFilter:
+        """从求职配置取四组关键词。"""
         return cls(
-            include=plan.get("include_keywords") or [],
-            exclude=plan.get("exclude_keywords") or [],
-            include_companies=plan.get("include_companies") or [],
-            exclude_companies=plan.get("exclude_companies") or [],
+            include=config.get("include_keywords") or [],
+            exclude=config.get("exclude_keywords") or [],
+            include_companies=config.get("include_companies") or [],
+            exclude_companies=config.get("exclude_companies") or [],
         )
 
     def reject_reason(self, title: str, company: str) -> str:
@@ -214,7 +214,7 @@ class PaceProfile(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    # 自定义速率码：此时读方案里保存的明细参数
+    # 自定义速率码：此时读配置里保存的明细参数
     CUSTOM: ClassVar[str] = "custom"
     # 预设速率码 → 与默认值不同的参数
     PRESETS: ClassVar[dict[str, dict[str, float]]] = {
@@ -255,7 +255,8 @@ class PaceProfile(BaseModel):
     @staticmethod
     def daily_factor(account: str, day: date | None = None) -> float:
         """按「账号 + 日期」算当天的节奏系数（0.85–1.2），同一天多次调用结果相同。"""
-        seed = f"{account}|{(day or date.today()).isoformat()}"
+        today = datetime.now().astimezone().date()
+        seed = f"{account}|{(day or today).isoformat()}"
         return random.Random(seed).uniform(0.85, 1.2)
 
     @classmethod
@@ -264,13 +265,13 @@ class PaceProfile(BaseModel):
         return cls(**cls.PRESETS.get(code, {}))
 
     @classmethod
-    def from_plan(cls, plan: Mapping[str, Any]) -> PaceProfile:
-        """方案 → 节奏：自定义读明细参数，否则按预设；参数不合法退回「正常」。"""
-        code = str(plan.get("pace") or "")
+    def from_config(cls, config: Mapping[str, Any]) -> PaceProfile:
+        """求职配置 → 节奏：自定义读明细参数，否则按预设；参数不合法退回「正常」。"""
+        code = str(config.get("pace") or "")
         if code != cls.CUSTOM:
             return cls.preset(code)
         try:
-            return cls.model_validate(plan.get("pace_params") or {})
+            return cls.model_validate(config.get("pace_params") or {})
         except ValidationError:
             return cls()
 
@@ -309,43 +310,47 @@ class PaceProfile(BaseModel):
 
 
 class Defaults:
-    """新建 / 种子方案时的默认筛选值。"""
+    """首次使用时的默认筛选值。"""
 
     QUERY = "ai应用开发"
-    CITY_CODE = City.code("广州")
+    CITIES = (City.default_label,)
     JOB_TYPE = JobType.code("全职")
     SALARY = ""
     PACE = Pace.code(Pace.default_label)
 
 
 class SearchUrl:
-    """根据求职方案拼装 BOSS geek jobs 搜索 URL。"""
+    """根据求职配置拼装 BOSS geek jobs 搜索 URL。"""
 
     PATH = f"{BASE_URL}/web/geek/jobs"
 
     @classmethod
-    def build(cls, plan: Mapping[str, Any] | Any) -> str:
-        """支持 dict 或带同名属性的对象。"""
+    def by_city(cls, config: Mapping[str, Any]) -> list[tuple[str, str]]:
+        """按所选城市顺序生成 [(城市名, 搜索 URL)]；未选城市时用默认城市。"""
+        cities = [c for c in config.get("cities") or [] if City.code(c)] or list(Defaults.CITIES)
+        return [(city, cls.build(config, city)) for city in cities]
 
-        def _get(key: str, default: Any = "") -> Any:
-            if isinstance(plan, Mapping):
-                return plan.get(key, default)
-            return getattr(plan, key, default)
+    @classmethod
+    def build(cls, config: Mapping[str, Any], city: str) -> str:
+        """拼装某个城市的搜索 URL。"""
+
+        def _get(key: str) -> str:
+            return str(config.get(key) or "").strip()
 
         def _list(key: str) -> list[str]:
-            raw = _get(key) or []
+            raw = config.get(key) or []
             return [] if isinstance(raw, str) else list(raw)
 
         params: dict[str, str] = {}
-        query = str(_get("query") or "").strip()
-        city = str(_get("city_code") or Defaults.CITY_CODE).strip()
-        job_type = str(_get("job_type") or "").strip()
-        salary = str(_get("salary") or "").strip()
+        query = _get("query")
+        city_code = City.code(city)
+        job_type = _get("job_type")
+        salary = _get("salary")
 
         if query:
             params["query"] = query
-        if city:
-            params["city"] = city
+        if city_code:
+            params["city"] = city_code
         if job_type:
             params["jobType"] = job_type
         if salary:

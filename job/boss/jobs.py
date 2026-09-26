@@ -22,12 +22,13 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_ai.exceptions import AgentRunError
 
 from job.boss.filters import BASE_URL, KeywordFilter, PaceProfile
 from job.models.job import JobRow
 from job.utils import as_dict
 
-# 日志回调：(级别 info / ok / skip / warn, 内容)
+# 日志回调：(级别 info / ok / dup 重复 / skip 跳过 / warn, 内容)
 LogSink = Callable[[str, str], Awaitable[None]]
 
 if TYPE_CHECKING:
@@ -137,6 +138,8 @@ class JobScraper:
     DIALOG = "[class*='dialog']"
     # 当日投递次数用完的弹窗文案
     LIMIT = re.compile(r"上限|明天再来")
+    # 沟通按钮是「继续沟通」时的结果
+    CHATTED = "此前已沟通"
     # 每日投递上限
     DAILY_LIMIT = 150
     # 列表接口 URL 特征
@@ -165,23 +168,23 @@ class JobScraper:
 
     async def search(
         self,
-        url: str,
+        targets: list[tuple[str, str]],
         *,
         pace: PaceProfile | None = None,
         keywords: KeywordFilter | None = None,
         reviewer: JobReviewer | None = None,
         on_job: Callable[[Job], Awaitable[None]] | None = None,
         on_log: LogSink | None = None,
-    ) -> tuple[str, list[Job], str]:
-        """按节奏 ``pace`` 在搜索页自动投递，``keywords`` 不符合的卡片跳过不点开。
+    ) -> tuple[list[Job], str]:
+        """按城市依次自动投递：``targets`` 为 [(城市名, 搜索 URL)]，一个城市看完换下一个。
 
+        按节奏 ``pace`` 投递，``keywords`` 不符合的卡片跳过不点开；
         传了 ``reviewer`` 时，点开详情后再做一次 AI 复核，不通过的不投递。
-        只有投递成功的岗位入库，下次直接跳过；每天最多投递 ``DAILY_LIMIT`` 次。
+        看过的岗位连同是否合适、原因一起入库，下次直接跳过；每天最多投递 ``DAILY_LIMIT`` 次。
         过程日志交给 ``on_log``（不打印到终端）。
-        返回 (最终 URL, 职位列表, 状态)；状态为 done / stopped / need_login / limit。
+        返回 (职位列表, 状态)；状态为 done / stopped / need_login / limit。
         """
         self._stop.clear()
-        self._listed.clear()
         self._pace = pace or PaceProfile()
         self._keywords = keywords or KeywordFilter()
         self._reviewer = reviewer
@@ -191,33 +194,52 @@ class JobScraper:
         self._today = JobRow.count_today()
         await self._log(f"今日已投递 {self._today} / {self.DAILY_LIMIT}")
         if self._today >= self.DAILY_LIMIT:
-            return url, [], "limit"
+            return [], "limit"
         self._day_factor = PaceProfile.daily_factor(str(self.session.user_data_dir))
         page = await self.session.page()
 
         page.on("response", self._on_list_response)
+        jobs: list[Job] = []
         try:
-            await page.goto(url, wait_until="domcontentloaded")
-            try:
-                await page.wait_for_selector(self.CARD, timeout=20_000)
-            except PlaywrightTimeoutError:
-                need_login = await page.locator(self.LOGIN).is_visible()
-                return page.url, [], "need_login" if need_login else "done"
-
-            jobs: list[Job] = []
-            done: set[str] = set()
-            idle = 0
-            for _ in range(self.MAX_SCROLLS):
-                seen = len(done)
-                jobs += await self._scrape_cards(page, done, on_job)
-                idle = 0 if len(done) > seen else idle + 1
-                if self._stop.is_set() or idle >= 2:
-                    break
-                await self._load_more(page)
-                await self._pause(self._pace.scroll)
-            return page.url, jobs, self._end_state()
+            for i, (city, url) in enumerate(targets):
+                if i:
+                    await self._log(f"{targets[i - 1][0]}的岗位已看完，切换到{city}")
+                else:
+                    await self._log(f"开始搜索{city}的岗位")
+                state = await self._search_city(page, url, jobs, on_job)
+                if state != "done":
+                    return jobs, state
+            return jobs, "done"
         finally:
             page.remove_listener("response", self._on_list_response)
+
+    async def _search_city(
+        self,
+        page: Page,
+        url: str,
+        jobs: list[Job],
+        on_job: Callable[[Job], Awaitable[None]] | None,
+    ) -> str:
+        """投递一个城市的搜索结果，投递成功的追加进 ``jobs``；返回状态。"""
+        self._listed.clear()
+        await page.goto(url, wait_until="domcontentloaded")
+        try:
+            await page.wait_for_selector(self.CARD, timeout=20_000)
+        except PlaywrightTimeoutError:
+            need_login = await page.locator(self.LOGIN).is_visible()
+            return "need_login" if need_login else "done"
+
+        done: set[str] = set()
+        idle = 0
+        for _ in range(self.MAX_SCROLLS):
+            seen = len(done)
+            jobs.extend(await self._scrape_cards(page, done, on_job))
+            idle = 0 if len(done) > seen else idle + 1
+            if self._stop.is_set() or idle >= 2:
+                break
+            await self._load_more(page)
+            await self._pause(self._pace.scroll)
+        return self._end_state()
 
     async def _scrape_cards(
         self,
@@ -227,7 +249,8 @@ class JobScraper:
     ) -> list[Job]:
         """逐个处理当前可见、未看过的卡片。
 
-        已在库中或不符合关键词的跳过不点开，其余点开取详情、复核后投递并入库。
+        库里已有的（职位 ID 或标题、公司、HR 相同）直接跳过；不符合关键词的记为不合适，
+        不点开；其余点开取详情、AI 复核，合适的投递。判断结果和原因都入库。
         """
         cards = page.locator(self.CARD)
         batch: list[Job] = []
@@ -239,29 +262,41 @@ class JobScraper:
             if job is None or job.job_id in done:
                 continue
             done.add(job.job_id)
-            if JobRow.exists(job):
-                await self._log(f"{job.title} · {job.company}（已在库中）", "skip")
+            name = f"{job.title} · {job.company}"
+            if seen := JobRow.find_duplicate(job):
+                note = f"：{seen.reason}" if seen.reason else ""
+                await self._log(f"{name}（看过，{seen.result}{note}）", "dup")
                 continue
             if reason := self._keywords.reject_reason(job.title, job.company):
-                await self._log(f"{job.title} · {job.company}（{reason}）", "skip")
+                JobRow.record(job, suitable=False, reason=reason)
+                await self._log(f"{name}（{reason}）", "skip")
                 continue
 
             job = await self._open_detail(page, card, job)
-            reason, score = "", None
+            reason, score = "符合筛选条件", None
             if self._reviewer:
-                reason, score = await self._reviewer.check(job)
-            if reason:
-                await self._log(f"{job.title} · {job.company}（{reason}）", "skip")
-                await self._pause(self._pace.read)
-                continue
+                try:
+                    verdict = await self._reviewer.check(job)
+                except AgentRunError as exc:
+                    await self._log(f"{name}（AI 复核失败，下次再试：{exc}）", "warn")
+                    await self._pause(self._pace.read)
+                    continue
+                reason, score = verdict.reason, verdict.score
+                if not verdict.match:
+                    JobRow.record(job, suitable=False, reason=reason, score=score)
+                    await self._log(f"{name}（不合适：{reason}）", "skip")
+                    await self._pause(self._pace.read)
+                    continue
 
             await self._pause(self._pace.read)
             status = await self._apply(page)
+            if status == self.CHATTED:
+                JobRow.record(job, reason=reason, score=score)
             if status:
                 level = "warn" if self._limit_hit else "skip"
-                await self._log(f"{job.title} · {job.company}（{status}）", level)
+                await self._log(f"{name}（{status}）", level)
                 continue
-            JobRow.upsert_from(job, score)
+            JobRow.record(job, reason=reason, score=score, applied=True)
             batch.append(job)
             self._saved += 1
             self._today += 1
@@ -287,7 +322,7 @@ class JobScraper:
         try:
             text = (await button.inner_text(timeout=5_000)).strip()
             if text != "立即沟通":
-                return "此前已沟通" if "继续" in text else f"沟通按钮为「{text}」"
+                return self.CHATTED if "继续" in text else f"沟通按钮为「{text}」"
             await button.click(timeout=5_000)
             await stay.or_(limit).first.wait_for(timeout=8_000)
             if await limit.first.is_visible():

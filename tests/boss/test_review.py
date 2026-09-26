@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 
-from pydantic_ai.exceptions import ModelHTTPError
+import pytest
+from pydantic_ai.exceptions import AgentRunError, ModelHTTPError
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from job.boss.jobs import Job
-from job.boss.review import JobReviewer
+from job.boss.review import JobReviewer, Verdict
 from job.models.setting import LlmSettings
 
 LLM = LlmSettings(api_key="k", model="deepseek-v4-pro")
@@ -38,36 +39,36 @@ def _reviewer_answering(
     return reviewer, reviewer.agent.override(model=FunctionModel(answer))
 
 
-def test_from_plan_requires_switch_and_requirement():
+def test_from_config_requires_switch_and_requirement():
     off = {"ai_review": False, "ai_requirement": "x"}
     blank = {"ai_review": True, "ai_requirement": "  "}
-    assert JobReviewer.from_plan(off, LLM) is None
-    assert JobReviewer.from_plan(blank, LLM) is None
-    plan = {"ai_review": True, "ai_requirement": " 只投 Agent "}
-    reviewer = JobReviewer.from_plan(plan, LLM)
+    assert JobReviewer.from_config(off, LLM) is None
+    assert JobReviewer.from_config(blank, LLM) is None
+    config = {"ai_review": True, "ai_requirement": " 只投 Agent "}
+    reviewer = JobReviewer.from_config(config, LLM)
     assert reviewer is not None and reviewer.requirement == "只投 Agent"
 
 
-def test_from_plan_resume_match():
-    plan = {"resume_match": True, "resume_text": " Python / LangGraph "}
-    reviewer = JobReviewer.from_plan(plan, LLM)
+def test_from_config_resume_match():
+    config = {"resume_match": True, "resume_text": " Python / LangGraph "}
+    reviewer = JobReviewer.from_config(config, LLM)
     assert reviewer is not None
     assert reviewer.resume == "Python / LangGraph" and reviewer.requirement == ""
     assert reviewer.checks == ["简历技术匹配"]
     assert "简历技术匹配" in reviewer.instructions
     assert "岗位意图" not in reviewer.instructions
-    assert JobReviewer.from_plan({"resume_match": True, "resume_text": ""}, LLM) is None
-    assert JobReviewer.from_plan({"resume_text": "Python"}, LLM) is None
+    assert JobReviewer.from_config({"resume_match": True, "resume_text": ""}, LLM) is None
+    assert JobReviewer.from_config({"resume_text": "Python"}, LLM) is None
 
 
 def test_both_checks_in_one_prompt():
-    plan = {
+    config = {
         "ai_review": True,
         "ai_requirement": "只投 Agent",
         "resume_match": True,
         "resume_text": "Python LangGraph",
     }
-    reviewer = JobReviewer.from_plan(plan, LLM)
+    reviewer = JobReviewer.from_config(config, LLM)
     assert reviewer is not None and reviewer.checks == ["AI 岗位筛选", "简历技术匹配"]
     prompt = reviewer._prompt(JOB)
     assert "只投 Agent" in prompt and "Python LangGraph" in prompt
@@ -83,14 +84,14 @@ def test_match_passes_and_prompt_has_requirement():
     prompts: list[str] = []
     reviewer, override = _reviewer_answering(True, "Agent 开发", prompts)
     with override:
-        assert asyncio.run(reviewer.check(JOB)) == ("", None)
+        assert asyncio.run(reviewer.check(JOB)) == Verdict(match=True, reason="Agent 开发")
     assert "只投 Agent" in prompts[0] and "搭建 LLM 智能体" in prompts[0]
 
 
 def test_mismatch_rejects_with_reason():
     reviewer, override = _reviewer_answering(False, "销售岗")
     with override:
-        assert asyncio.run(reviewer.check(JOB)) == ("AI 复核不通过：销售岗", None)
+        assert asyncio.run(reviewer.check(JOB)) == Verdict(match=False, reason="销售岗")
 
 
 def test_resume_match_returns_score():
@@ -98,13 +99,15 @@ def test_resume_match_returns_score():
         True, "技术吻合", score=85, resume="Python"
     )
     with override:
-        assert asyncio.run(reviewer.check(JOB)) == ("", 85)
+        assert asyncio.run(reviewer.check(JOB)) == Verdict(
+            match=True, reason="技术吻合", score=85
+        )
 
 
-def test_min_score_from_plan_only_when_enabled():
-    plan = {"resume_match": True, "resume_text": "Python", "min_score": 70}
-    assert JobReviewer.from_plan(plan, LLM).min_score is None
-    reviewer = JobReviewer.from_plan({**plan, "score_filter": True}, LLM)
+def test_min_score_from_config_only_when_enabled():
+    config = {"resume_match": True, "resume_text": "Python", "min_score": 70}
+    assert JobReviewer.from_config(config, LLM).min_score is None
+    reviewer = JobReviewer.from_config({**config, "score_filter": True}, LLM)
     assert reviewer.min_score == 70
     assert reviewer.checks == ["简历技术匹配", "匹配度 ≥70"]
 
@@ -115,32 +118,29 @@ def test_low_score_rejected_by_min_score():
     )
     with override:
         reviewer.min_score = 60
-        assert asyncio.run(reviewer.check(JOB)) == ("匹配度 55 分，低于 60 分", 55)
+        assert asyncio.run(reviewer.check(JOB)) == Verdict(
+            match=False, reason="匹配度 55 分，低于 60 分", score=55
+        )
         reviewer.min_score = 50
-        assert asyncio.run(reviewer.check(JOB)) == ("", 55)
-
-
-def test_score_only():
-    reviewer, override = _reviewer_answering(False, "不符", score=40, resume="Python")
-    with override:
-        assert asyncio.run(reviewer.score(JOB)) == 40
-    assert asyncio.run(JobReviewer(llm=LLM).score(JOB)) is None
+        assert asyncio.run(reviewer.check(JOB)).match is True
 
 
 def test_score_ignored_without_resume():
     reviewer, override = _reviewer_answering(True, "Agent 开发", score=85)
     with override:
-        assert asyncio.run(reviewer.check(JOB)) == ("", None)
+        assert asyncio.run(reviewer.check(JOB)).score is None
 
 
-def test_api_error_rejects():
+def test_api_error_raises():
     def fail(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
         raise ModelHTTPError(status_code=401, model_name="deepseek-v4-flash")
 
     reviewer = JobReviewer(requirement="只投 Agent", llm=LLM)
-    with reviewer.agent.override(model=FunctionModel(fail)):
-        reason, score = asyncio.run(reviewer.check(JOB))
-    assert reason.startswith("AI 复核失败") and score is None
+    with (
+        reviewer.agent.override(model=FunctionModel(fail)),
+        pytest.raises(AgentRunError),
+    ):
+        asyncio.run(reviewer.check(JOB))
 
 
 def test_api_key_is_trimmed():

@@ -5,14 +5,19 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from sqlalchemy import or_
 from sqlmodel import Field, SQLModel, col, select
 
 if TYPE_CHECKING:
     from job.boss.jobs import Job
 
 
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
 class JobRow(SQLModel, table=True):
-    """投递成功的岗位记录。"""
+    """看过的岗位：合适的投递，不合适的也记下原因，下次遇到直接跳过。"""
 
     __tablename__ = "job"
 
@@ -25,6 +30,8 @@ class JobRow(SQLModel, table=True):
         "未分析",
         f"高匹配（≥{HIGH_MATCH}）",
     )
+    # 是否合适筛选项（第一项为不筛选）
+    SUITABLE_FILTERS: ClassVar[tuple[str, ...]] = ("全部", "合适", "不合适")
 
     uid: str = Field(primary_key=True, description="主键：优先 job_id，否则用 link")
     job_id: str | None = Field(default=None, index=True)
@@ -42,14 +49,23 @@ class JobRow(SQLModel, table=True):
     match_score: int | None = Field(
         default=None, index=True, description="匹配度 0–100；未分析为空"
     )
-    scraped_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        index=True,
-    )
+    suitable: bool = Field(default=True, description="是否合适")
+    applied: bool = Field(default=False, description="是否已投递（点过「立即沟通」）")
+    reason: str = Field(default="", description="合适或不合适的原因，如「外包公司」")
+    created_at: datetime = Field(default_factory=_now, index=True, description="首次入库时间（UTC）")
+    updated_at: datetime = Field(default_factory=_now, description="最后更新时间（UTC）")
+
+    @property
+    def result(self) -> str:
+        """处理结果：已投递 / 已沟通过 / 不合适。"""
+        if not self.suitable:
+            return "不合适"
+        return "已投递" if self.applied else "已沟通过"
 
     def to_dict(self) -> dict[str, Any]:
         """转为前端表格字典。"""
         score = self.match_score
+        created = self.created_at.replace(tzinfo=self.created_at.tzinfo or UTC)
         return {
             "uid": self.uid,
             "title": self.title,
@@ -65,6 +81,10 @@ class JobRow(SQLModel, table=True):
             "education": self.education,
             "matchStatus": "未分析" if score is None else f"{score} 分",
             "matchHigh": score is not None and score >= self.HIGH_MATCH,
+            "result": self.result,
+            "suitable": self.suitable,
+            "reason": self.reason,
+            "createdAt": created.astimezone().strftime("%Y-%m-%d %H:%M"),
         }
 
     @staticmethod
@@ -73,29 +93,54 @@ class JobRow(SQLModel, table=True):
         return job.job_id or job.link or f"{job.company}|{job.title}|{job.salary}"
 
     @classmethod
-    def upsert_from(cls, job: Job, score: int | None = None) -> JobRow:
-        """按 uid 插入或更新；没给新匹配度 ``score`` 时保留已有的。"""
+    def record(
+        cls,
+        job: Job,
+        *,
+        suitable: bool = True,
+        reason: str = "",
+        score: int | None = None,
+        applied: bool = False,
+    ) -> JobRow:
+        """按 uid 插入或更新判断结果；没给新匹配度 ``score`` 时保留已有的。"""
         from job.models import db_session
 
         row = cls(
             **job.model_dump(),
             uid=cls.uid_for(job),
             match_score=score,
-            scraped_at=datetime.now(UTC),
+            suitable=suitable,
+            applied=applied,
+            reason=reason,
         )
         with db_session() as session:
-            if score is None and (existing := session.get(cls, row.uid)):
-                row.match_score = existing.match_score
+            if existing := session.get(cls, row.uid):
+                row.created_at = existing.created_at
+                if score is None:
+                    row.match_score = existing.match_score
             merged = session.merge(row)
             session.commit()
             session.refresh(merged)
             return merged
 
     @classmethod
-    def _apply_filters(cls, stmt, search: str, analysis: str):
-        """按岗位名 / 公司模糊搜，并按分析状态（``ANALYSIS_FILTERS`` 之一）筛选。"""
-        from sqlalchemy import or_
+    def find_duplicate(cls, job: Job) -> JobRow | None:
+        """库里的同一岗位：职位 ID 相同，或招聘标题、公司、HR 都相同。"""
+        from job.models import db_session
 
+        with db_session() as session:
+            if row := session.get(cls, cls.uid_for(job)):
+                return row
+            stmt = select(cls).where(
+                col(cls.title) == job.title,
+                col(cls.company) == job.company,
+                col(cls.hr_name) == job.hr_name,
+            )
+            return session.exec(stmt.limit(1)).first()
+
+    @classmethod
+    def _apply_filters(cls, stmt, search: str, analysis: str, suitable: str):
+        """按岗位名 / 公司模糊搜，并按分析状态、是否合适筛选。"""
         if q := search.strip():
             like = f"%{q}%"
             stmt = stmt.where(
@@ -108,18 +153,35 @@ class JobRow(SQLModel, table=True):
             pending: score.is_(None),
             high: score >= cls.HIGH_MATCH,
         }
-        return stmt.where(conditions[analysis]) if analysis in conditions else stmt
+        if analysis in conditions:
+            stmt = stmt.where(conditions[analysis])
+        _, yes, no = cls.SUITABLE_FILTERS
+        if suitable in (yes, no):
+            stmt = stmt.where(col(cls.suitable).is_(suitable == yes))
+        return stmt
 
     @classmethod
-    def count(cls, *, search: str = "", analysis: str = "") -> int:
-        """统计岗位数；可按关键字与分析状态筛选。"""
+    def count(cls, *, search: str = "", analysis: str = "", suitable: str = "") -> int:
+        """统计岗位数；可按关键字、分析状态与是否合适筛选。"""
         from sqlalchemy import func
 
         from job.models import db_session
 
         with db_session() as session:
             stmt = select(func.count()).select_from(cls)
-            return int(session.exec(cls._apply_filters(stmt, search, analysis)).one())
+            stmt = cls._apply_filters(stmt, search, analysis, suitable)
+            return int(session.exec(stmt).one())
+
+    @classmethod
+    def count_applied(cls) -> int:
+        """累计投递数。"""
+        from sqlalchemy import func
+
+        from job.models import db_session
+
+        stmt = select(func.count()).select_from(cls).where(col(cls.applied).is_(True))
+        with db_session() as session:
+            return int(session.exec(stmt).one())
 
     @classmethod
     def list_dicts(
@@ -127,15 +189,16 @@ class JobRow(SQLModel, table=True):
         *,
         search: str = "",
         analysis: str = "",
+        suitable: str = "",
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """分页列表（新抓取优先）。"""
+        """分页列表（新入库优先）。"""
         from job.models import db_session
 
         with db_session() as session:
-            stmt = select(cls).order_by(col(cls.scraped_at).desc())
-            stmt = cls._apply_filters(stmt, search, analysis)
+            stmt = select(cls).order_by(col(cls.created_at).desc())
+            stmt = cls._apply_filters(stmt, search, analysis, suitable)
             rows = session.exec(stmt.offset(offset).limit(limit)).all()
         return [r.to_dict() for r in rows]
 
@@ -150,7 +213,7 @@ class JobRow(SQLModel, table=True):
 
     @classmethod
     def count_today(cls) -> int:
-        """今天（本地时区）入库的岗位数，即今日投递数。"""
+        """今天（本地时区）投递的岗位数。"""
         from sqlalchemy import func
 
         from job.models import db_session
@@ -159,31 +222,33 @@ class JobRow(SQLModel, table=True):
             hour=0, minute=0, second=0, microsecond=0
         )
         since = midnight.astimezone(UTC)
-        stmt = select(func.count()).select_from(cls).where(col(cls.scraped_at) >= since)
+        stmt = (
+            select(func.count())
+            .select_from(cls)
+            .where(col(cls.applied).is_(True), col(cls.created_at) >= since)
+        )
         with db_session() as session:
             return int(session.exec(stmt).one())
 
     @classmethod
-    def set_score(cls, uid: str, score: int) -> bool:
-        """更新匹配度；岗位不存在返回 False。"""
+    def set_verdict(
+        cls, uid: str, *, suitable: bool, reason: str, score: int | None
+    ) -> bool:
+        """写回 AI 判断：是否合适、原因与匹配度（为空时保留原匹配度）；岗位不存在返回 False。"""
         from job.models import db_session
 
         with db_session() as session:
             row = session.get(cls, uid)
             if row is None:
                 return False
-            row.match_score = score
+            row.suitable = suitable
+            row.reason = reason
+            if score is not None:
+                row.match_score = score
+            row.updated_at = _now()
             session.add(row)
             session.commit()
             return True
-
-    @classmethod
-    def exists(cls, job: Job) -> bool:
-        """这条职位是否已入库。"""
-        from job.models import db_session
-
-        with db_session() as session:
-            return session.get(cls, cls.uid_for(job)) is not None
 
     @classmethod
     def delete_by_uid(cls, uid: str) -> bool:

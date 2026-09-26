@@ -6,7 +6,7 @@ import reflex as rx
 
 from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
-from job.ui.state import BossState
+from job.ui.state.boss import BossState
 from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
 
 
@@ -81,15 +81,15 @@ class WorkbenchPage:
         return rx.box(
             rx.heading("自动投递", size="5", color=TEXT),
             rx.text(
-                "按求职方案智能筛选合适的岗位，自动替你向 HR 打招呼。",
+                "按求职配置智能筛选合适的岗位，自动替你向 HR 打招呼。",
                 color=MUTED,
                 font_size="0.85em",
                 margin_top="0.35em",
             ),
             rx.cond(
-                BossState.active_plan_name != "",
+                BossState.target_cities != "",
                 rx.text(
-                    f"当前方案：{BossState.active_plan_name}",
+                    f"目标城市：{BossState.target_cities}",
                     font_size="0.8em",
                     color=ACCENT,
                     margin_top="0.5em",
@@ -138,7 +138,7 @@ class WorkbenchPage:
                     rx.button(
                         "停止",
                         on_click=BossState.stop_apply,
-                        disabled=BossState.busy == False,  # noqa: E712
+                        disabled=BossState.busy == False,
                         color_scheme="red",
                         variant="soft",
                         flex="1",
@@ -171,11 +171,12 @@ class WorkbenchPage:
 
     @staticmethod
     def _log_row(entry: rx.Var) -> rx.Component:
-        """一条日志：时间 · 级别图标 · 内容；投递绿色、跳过灰色、异常橙色。"""
+        """一条日志：时间 · 级别图标 · 内容；投递绿色、重复蓝灰、跳过灰色、异常橙色。"""
         level = entry["level"]
         icon = rx.match(
             level,
             ("ok", rx.icon("circle-check", size=14, color="#12b76a")),
+            ("dup", rx.icon("copy", size=14, color="#98a2b3")),
             ("skip", rx.icon("circle-minus", size=14, color="#98a2b3")),
             ("warn", rx.icon("triangle-alert", size=14, color="#f79009")),
             rx.icon("info", size=14, color=ACCENT),
@@ -183,6 +184,7 @@ class WorkbenchPage:
         tag = rx.match(
             level,
             ("ok", rx.badge("投递", color_scheme="green", variant="soft", size="1")),
+            ("dup", rx.badge("重复", color_scheme="indigo", variant="soft", size="1")),
             ("skip", rx.badge("跳过", color_scheme="gray", variant="soft", size="1")),
             ("warn", rx.badge("注意", color_scheme="orange", variant="soft", size="1")),
             rx.fragment(),
@@ -201,7 +203,7 @@ class WorkbenchPage:
             rx.text(
                 entry["text"],
                 font_size="0.85em",
-                color=rx.cond(level == "skip", MUTED, TEXT),
+                color=rx.cond((level == "skip") | (level == "dup"), MUTED, TEXT),
                 word_break="break-all",
             ),
             align="start",
@@ -218,7 +220,8 @@ class WorkbenchPage:
                 rx.vstack(
                     rx.text("运行日志", font_weight="700", color=TEXT),
                     rx.text(
-                        f"本次投递 {BossState.session_count} · 共 {BossState.log.length()} 条",
+                        f"本次投递 {BossState.session_count} · 重复 {BossState.dup_count}"
+                        f" · 跳过 {BossState.skip_count} · 共 {BossState.log.length()} 条",
                         font_size="0.75em",
                         color=MUTED,
                     ),

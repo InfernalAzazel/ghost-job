@@ -1,24 +1,24 @@
-"""Configuration center page (plan header + filters + manager)."""
+"""配置中心页面（求职配置 + AI 服务）。"""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import reflex as rx
 
 from job.ui.components.form import field_label, form_title, switch_card
 from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
-from job.ui.state import LlmState, PlansState
+from job.ui.state.config import ConfigState
+from job.ui.state.llm import LlmState
 from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
 
 
 class ConfigPage:
-    """配置中心：左侧菜单（求职方案 / 大模型）+ 右侧内容。"""
+    """配置中心：左侧菜单（求职配置 / AI 服务）+ 右侧内容。"""
 
-    # 左侧菜单：(分组, [(section, 图标, 名称)])
     # 标签框里的无边框输入框样式
-    BARE_INPUT = {
+    BARE_INPUT: ClassVar[dict[str, str]] = {
         "border": "none",
         "outline": "none",
         "background": "transparent",
@@ -27,13 +27,14 @@ class ConfigPage:
         "font_size": "0.9em",
     }
 
+    # 左侧菜单：(分组, [(section, 图标, 名称)])
     MENU = (
-        ("求职设置", (("plan", "layout-grid", "求职方案"),)),
+        ("求职设置", (("search", "layout-grid", "求职配置"),)),
         ("高级设置", (("llm", "sparkles", "AI 服务"),)),
     )
 
-    # 求职方案下的标签页：(tab, 图标, 名称)
-    PLAN_TABS = (
+    # 求职配置下的标签页：(tab, 图标, 名称)
+    TABS = (
         ("filters", "layout-grid", "岗位筛选"),
         ("resume", "file-text", "简历配置"),
     )
@@ -49,9 +50,9 @@ class ConfigPage:
                 cls._sidebar(),
                 rx.box(
                     rx.cond(
-                        PlansState.section == "llm",
+                        ConfigState.section == "llm",
                         cls._llm_panel(),
-                        cls._plan_panel(),
+                        cls._search_panel(),
                     ),
                     bg=CARD,
                     border=f"1px solid {BORDER}",
@@ -72,7 +73,6 @@ class ConfigPage:
                 min_height="0",
                 margin_top="0.5em",
             ),
-            cls._plan_manager(),
         )
 
     # --- sidebar ---
@@ -83,7 +83,7 @@ class ConfigPage:
         return rx.vstack(
             rx.hstack(
                 rx.icon("circle-check", size=14, color=MUTED),
-                rx.text(PlansState.save_hint, font_size="0.8em", color=MUTED),
+                rx.text(ConfigState.save_hint, font_size="0.8em", color=MUTED),
                 spacing="2",
                 align="center",
                 width="100%",
@@ -120,7 +120,7 @@ class ConfigPage:
     @staticmethod
     def _menu_item(section: str, icon: str, label: str) -> rx.Component:
         """菜单项：当前项高亮。"""
-        active = PlansState.section == section
+        active = ConfigState.section == section
         return rx.hstack(
             rx.icon(icon, size=16),
             rx.text(label, font_size="0.9em"),
@@ -133,27 +133,33 @@ class ConfigPage:
             color=rx.cond(active, ACCENT, TEXT),
             bg=rx.cond(active, ACCENT_SOFT, "transparent"),
             _hover={"bg": ACCENT_SOFT},
-            on_click=PlansState.set_section(section),
+            on_click=ConfigState.set_section(section),
         )
 
-    # --- plan panel ---
+    # --- search panel ---
 
     @classmethod
-    def _plan_panel(cls) -> rx.Component:
-        """求职方案：方案头 + 标签页（岗位筛选 / 简历配置）。"""
+    def _search_panel(cls) -> rx.Component:
+        """求职配置：标题说明 + 标签页（岗位筛选 / 简历配置）。"""
         return rx.fragment(
-            rx.box(cls._plan_header(), flex_shrink="0", width="100%"),
+            rx.box(
+                cls._panel_title(
+                    "求职配置",
+                    "设置想找的岗位和城市，自动投递会按这里的条件筛选岗位",
+                ),
+                flex_shrink="0",
+                margin_bottom="0.75em",
+            ),
             rx.hstack(
-                *[cls._tab_item(*tab) for tab in cls.PLAN_TABS],
+                *[cls._tab_item(*tab) for tab in cls.TABS],
                 spacing="5",
                 width="100%",
                 flex_shrink="0",
-                margin_top="1em",
                 border_bottom=f"1px solid {BORDER}",
             ),
             rx.box(
                 rx.cond(
-                    PlansState.plan_tab == "resume",
+                    ConfigState.search_tab == "resume",
                     cls._resume_form(),
                     cls._filters_form(),
                 ),
@@ -168,9 +174,18 @@ class ConfigPage:
         )
 
     @staticmethod
+    def _panel_title(title: str, description: str) -> rx.Component:
+        """右侧面板顶部的标题和一句说明。"""
+        return rx.vstack(
+            rx.text(title, font_weight="700", font_size="1.1em", color=TEXT),
+            rx.text(description, font_size="0.8em", color=MUTED),
+            spacing="1",
+        )
+
+    @staticmethod
     def _tab_item(tab: str, icon: str, label: str) -> rx.Component:
-        """方案标签页：当前页蓝字加下划线。"""
-        active = PlansState.plan_tab == tab
+        """标签页：当前页蓝字加下划线。"""
+        active = ConfigState.search_tab == tab
         return rx.hstack(
             rx.icon(icon, size=15),
             rx.text(label, font_size="0.9em"),
@@ -183,64 +198,7 @@ class ConfigPage:
             border_bottom=rx.cond(
                 active, f"2px solid {ACCENT}", "2px solid transparent"
             ),
-            on_click=PlansState.set_plan_tab(tab),
-        )
-
-    @classmethod
-    def _plan_header(cls) -> rx.Component:
-        return rx.vstack(
-            rx.hstack(
-                rx.vstack(
-                    rx.text("当前求职方案", font_weight="700", color=TEXT),
-                    rx.hstack(
-                        rx.select(
-                            PlansState.plan_names,
-                            value=PlansState.plan_name,
-                            on_change=PlansState.select_plan_by_name,
-                            placeholder="选择方案",
-                            size="3",
-                            width="280px",
-                        ),
-                        rx.cond(
-                            PlansState.is_default,
-                            rx.badge("默认使用", color_scheme="blue", variant="soft"),
-                        ),
-                        spacing="3",
-                        align="center",
-                    ),
-                    rx.text(
-                        "可为不同求职方向准备多套方案，自动投递时使用当前方案。",
-                        font_size="0.8em",
-                        color=MUTED,
-                        margin_top="0.35em",
-                    ),
-                    align="start",
-                    spacing="2",
-                ),
-                rx.spacer(),
-                rx.hstack(
-                    rx.button(
-                        rx.icon("plus", size=16),
-                        "新建方案",
-                        on_click=PlansState.create_plan,
-                        style={"background": ACCENT, "color": "white"},
-                        size="2",
-                    ),
-                    rx.button(
-                        rx.icon("settings", size=16),
-                        "方案管理",
-                        on_click=PlansState.open_manager,
-                        variant="outline",
-                        size="2",
-                    ),
-                    spacing="2",
-                ),
-                width="100%",
-                align="start",
-            ),
-            width="100%",
-            align="start",
-            spacing="1",
+            on_click=ConfigState.set_search_tab(tab),
         )
 
     # --- filters ---
@@ -317,10 +275,10 @@ class ConfigPage:
                 "简历技术匹配",
                 "投递前由 AI 对比岗位要求与你的技能，只投技术对口的岗位，"
                 "并在岗位列表显示匹配度",
-                PlansState.resume_match,
-                PlansState.set_resume_match,
+                ConfigState.resume_match,
+                ConfigState.set_resume_match,
                 rx.cond(
-                    PlansState.resume_match & (PlansState.resume_text == ""),
+                    ConfigState.resume_match & (ConfigState.resume_text == ""),
                     rx.text(
                         "请先上传简历或填写简历内容",
                         font_size="0.8em",
@@ -328,13 +286,13 @@ class ConfigPage:
                     ),
                 ),
                 rx.cond(
-                    PlansState.resume_match & ~LlmState.key_ready,
+                    ConfigState.resume_match & ~LlmState.key_ready,
                     rx.hstack(
                         rx.text("AI 服务尚未开通，", font_size="0.8em"),
                         rx.link(
                             "去开通",
                             font_size="0.8em",
-                            on_click=PlansState.set_section("llm"),
+                            on_click=ConfigState.set_section("llm"),
                         ),
                         spacing="0",
                         color="#f79009",
@@ -344,14 +302,14 @@ class ConfigPage:
             cls._switch_card(
                 "匹配度过滤",
                 "只投递匹配度达到设定分数的岗位",
-                PlansState.score_filter,
-                PlansState.set_score_filter,
+                ConfigState.score_filter,
+                ConfigState.set_score_filter,
                 rx.hstack(
                     rx.text("最低匹配度", font_size="0.85em", color=TEXT),
                     rx.input(
-                        disabled=~PlansState.score_filter,
-                        value=PlansState.min_score.to_string(),
-                        on_change=PlansState.set_min_score.debounce(500),
+                        disabled=~ConfigState.score_filter,
+                        value=ConfigState.min_score.to_string(),
+                        on_change=ConfigState.set_min_score.debounce(500),
                         type="number",
                         min="0",
                         max="100",
@@ -364,7 +322,7 @@ class ConfigPage:
                     align="center",
                 ),
                 rx.cond(
-                    PlansState.score_filter & ~PlansState.resume_match,
+                    ConfigState.score_filter & ~ConfigState.resume_match,
                     rx.text(
                         "请先开启上方的简历技术匹配",
                         font_size="0.8em",
@@ -376,7 +334,7 @@ class ConfigPage:
                 cls._field_label("简历附件"),
                 rx.hstack(
                     rx.input(
-                        value=PlansState.resume_path,
+                        value=ConfigState.resume_path,
                         placeholder="尚未上传简历",
                         read_only=True,
                         flex="1",
@@ -393,7 +351,7 @@ class ConfigPage:
                         accept={"application/pdf": [".pdf"]},
                         max_files=1,
                         no_drag=True,
-                        on_drop=PlansState.upload_resume(
+                        on_drop=ConfigState.upload_resume(
                             rx.upload_files(upload_id=cls.RESUME_UPLOAD)
                         ),
                     ),
@@ -401,9 +359,9 @@ class ConfigPage:
                     width="100%",
                 ),
                 rx.cond(
-                    PlansState.resume_hint != "",
+                    ConfigState.resume_hint != "",
                     rx.text(
-                        PlansState.resume_hint,
+                        ConfigState.resume_hint,
                         font_size="0.8em",
                         color=MUTED,
                         margin_top="0.35em",
@@ -414,8 +372,8 @@ class ConfigPage:
             rx.box(
                 cls._field_label("简历内容"),
                 rx.text_area(
-                    value=PlansState.resume_text,
-                    on_change=PlansState.set_resume_text.debounce(500),
+                    value=ConfigState.resume_text,
+                    on_change=ConfigState.set_resume_text.debounce(500),
                     placeholder="上传后自动识别简历内容，也可以直接粘贴或修改",
                     width="100%",
                     min_height="360px",
@@ -441,30 +399,25 @@ class ConfigPage:
             rx.box(
                 cls._field_label("岗位关键词"),
                 rx.input(
-                    value=PlansState.query,
-                    on_change=PlansState.set_query.debounce(400),
+                    value=ConfigState.query,
+                    on_change=ConfigState.set_query.debounce(400),
                     placeholder="例如：Agent 工程师",
                     width="100%",
                 ),
                 width="100%",
             ),
-            cls._select_field(
-                "目标城市",
-                PlansState.city_options,
-                PlansState.city_label,
-                PlansState.set_city,
-            ),
+            cls._combo_field("目标城市（多选，按顺序投递）", "cities", "选择城市"),
             cls._select_field(
                 "求职类型",
-                PlansState.job_type_options,
-                PlansState.job_type_label,
-                PlansState.set_job_type,
+                ConfigState.job_type_options,
+                ConfigState.job_type_label,
+                ConfigState.set_job_type,
             ),
             cls._select_field(
                 "薪资范围",
-                PlansState.salary_options,
-                PlansState.salary_label,
-                PlansState.set_salary,
+                ConfigState.salary_options,
+                ConfigState.salary_label,
+                ConfigState.set_salary,
             ),
             columns="2",
             spacing="4",
@@ -498,21 +451,25 @@ class ConfigPage:
         cls, title: str, field: str, placeholder: str, menu: rx.Component | None = None
     ) -> rx.Component:
         """下拉多选：框内是已选标签和搜索框，聚焦后弹出 ``menu``（默认为选项列表）。"""
-        is_open = PlansState.combo_open == field
-        selected = getattr(PlansState, field)
+        is_open = ConfigState.combo_open == field
+        selected = getattr(ConfigState, field)
         return rx.box(
             cls._field_label(title),
             rx.box(
                 cls._tag_box(
                     field,
-                    rx.el.input(
-                        value=rx.cond(is_open, PlansState.combo_query, ""),
-                        placeholder=rx.cond(selected.length() > 0, "", placeholder),
-                        on_focus=lambda _: PlansState.open_combo(field),
-                        on_blur=lambda _: PlansState.close_combo(),
-                        on_change=PlansState.set_combo_query,
-                        auto_complete="off",
-                        style=cls.BARE_INPUT,
+                    # 输入框先在本地保存输入内容，停顿后再同步：拼音输入过程中不被状态回写打断
+                    rx.debounce_input(
+                        rx.el.input(
+                            value=rx.cond(is_open, ConfigState.combo_query, ""),
+                            placeholder=rx.cond(selected.length() > 0, "", placeholder),
+                            on_focus=lambda _: ConfigState.open_combo(field),
+                            on_blur=lambda _: ConfigState.close_combo(),
+                            on_change=ConfigState.set_combo_query,
+                            auto_complete="off",
+                            style=cls.BARE_INPUT,
+                        ),
+                        debounce_timeout=250,
                     ),
                     rx.icon(
                         rx.cond(is_open, "search", "chevron-down"),
@@ -532,12 +489,12 @@ class ConfigPage:
     @classmethod
     def _combo_menu(cls, field: str) -> rx.Component:
         """下拉选项列表：按搜索词过滤，已选项打勾；按下即切换。"""
-        selected = getattr(PlansState, field)
+        selected = getattr(ConfigState, field)
         return cls._popup(
             rx.foreach(
-                getattr(PlansState, f"{field}_options"),
+                getattr(ConfigState, f"{field}_options"),
                 lambda label: rx.cond(
-                    label.contains(PlansState.combo_query),
+                    label.contains(ConfigState.combo_query),
                     rx.hstack(
                         rx.text(label, font_size="0.9em"),
                         rx.cond(
@@ -551,7 +508,7 @@ class ConfigPage:
                         cursor="pointer",
                         color=rx.cond(selected.contains(label), ACCENT, TEXT),
                         _hover={"bg": "#f2f4f7"},
-                        on_mouse_down=PlansState.toggle_item(field, label),
+                        on_mouse_down=ConfigState.toggle_item(field, label),
                     ),
                 ),
             ),
@@ -618,8 +575,8 @@ class ConfigPage:
                     spacing="1",
                 ),
                 rx.switch(
-                    checked=PlansState.ai_review,
-                    on_change=PlansState.set_ai_review,
+                    checked=ConfigState.ai_review,
+                    on_change=ConfigState.set_ai_review,
                 ),
                 justify="between",
                 align="start",
@@ -629,8 +586,8 @@ class ConfigPage:
             ),
             cls._field_label("求职方向"),
             rx.text_area(
-                value=PlansState.ai_requirement,
-                on_change=PlansState.set_ai_requirement.debounce(500),
+                value=ConfigState.ai_requirement,
+                on_change=ConfigState.set_ai_requirement.debounce(500),
                 placeholder=(
                     "例如：只投 AI 应用开发、AI Agent 工程师等岗位，"
                     "以 Python、LLM、Agent、RAG 落地为核心。"
@@ -652,7 +609,7 @@ class ConfigPage:
                     rx.text("AI 服务尚未开通，", color="#d92d20"),
                     rx.link(
                         "去开通",
-                        on_click=PlansState.set_section("llm"),
+                        on_click=ConfigState.set_section("llm"),
                         cursor="pointer",
                     ),
                     spacing="0",
@@ -677,7 +634,7 @@ class ConfigPage:
             "选择行业，或输入关键字搜索",
             menu=cls._popup(
                 rx.cond(
-                    PlansState.combo_query != "",
+                    ConfigState.combo_query != "",
                     cls._industry_matches(),
                     rx.hstack(
                         cls._industry_groups(),
@@ -697,13 +654,13 @@ class ConfigPage:
         """左栏：大类；悬停切换右栏，勾选框整类全选 / 取消。"""
         return rx.box(
             rx.foreach(
-                PlansState.industry_groups,
+                ConfigState.industry_groups,
                 lambda group: cls._check_row(
                     group,
-                    PlansState.industry_group_marks[group],
-                    on_check=PlansState.toggle_industry_group(group),
-                    active=PlansState.industry_group == group,
-                    on_mouse_enter=PlansState.set_industry_group(group),
+                    ConfigState.industry_group_marks[group],
+                    on_check=ConfigState.toggle_industry_group(group),
+                    active=ConfigState.industry_group == group,
+                    on_mouse_enter=ConfigState.set_industry_group(group),
                     trailing=rx.icon("chevron-right", size=14, color=MUTED),
                 ),
             ),
@@ -719,7 +676,7 @@ class ConfigPage:
         """右栏：当前大类下的行业。"""
         return rx.box(
             rx.foreach(
-                PlansState.industry_group_items, lambda n: cls._industry_leaf(n)
+                ConfigState.industry_group_items, lambda n: cls._industry_leaf(n)
             ),
             flex="1",
             padding="4px",
@@ -731,9 +688,9 @@ class ConfigPage:
     def _industry_matches(cls) -> rx.Component:
         """搜索结果：所有大类里名字含关键字的行业。"""
         return rx.box(
-            rx.foreach(PlansState.industry_matches, lambda n: cls._industry_leaf(n)),
+            rx.foreach(ConfigState.industry_matches, lambda n: cls._industry_leaf(n)),
             rx.cond(
-                PlansState.industry_matches.length() == 0,
+                ConfigState.industry_matches.length() == 0,
                 rx.text(
                     "没有匹配的行业", font_size="0.85em", color=MUTED, padding="0.75em"
                 ),
@@ -745,9 +702,9 @@ class ConfigPage:
 
     @classmethod
     def _industry_leaf(cls, name: rx.Var) -> rx.Component:
-        mark = rx.cond(PlansState.industry.contains(name), "all", "none")
+        mark = rx.cond(ConfigState.industry.contains(name), "all", "none")
         return cls._check_row(
-            name, mark, on_check=PlansState.toggle_item("industry", name)
+            name, mark, on_check=ConfigState.toggle_item("industry", name)
         )
 
     @staticmethod
@@ -802,7 +759,7 @@ class ConfigPage:
                         style=cls.BARE_INPUT,
                     ),
                 ),
-                on_submit=lambda form: PlansState.add_item(
+                on_submit=lambda form: ConfigState.add_item(
                     field, form.to(dict)["tag"]
                 ),
                 reset_on_submit=True,
@@ -816,7 +773,7 @@ class ConfigPage:
         """带边框的标签框：``field`` 已选项为可删除标签，后面接输入框或下拉。"""
         return rx.hstack(
             rx.foreach(
-                getattr(PlansState, field),
+                getattr(ConfigState, field),
                 lambda label: rx.hstack(
                     rx.text(label, font_size="0.8em", color=TEXT),
                     rx.icon(
@@ -824,7 +781,7 @@ class ConfigPage:
                         size=12,
                         color=MUTED,
                         cursor="pointer",
-                        on_click=PlansState.remove_item(field, label),
+                        on_click=ConfigState.remove_item(field, label),
                     ),
                     spacing="1",
                     align="center",
@@ -852,11 +809,11 @@ class ConfigPage:
         return rx.box(
             rx.segmented_control.root(
                 rx.foreach(
-                    PlansState.pace_options,
+                    ConfigState.pace_options,
                     lambda label: rx.segmented_control.item(label, value=label),
                 ),
-                value=PlansState.pace_label,
-                on_change=PlansState.set_pace,
+                value=ConfigState.pace_label,
+                on_change=ConfigState.set_pace,
             ),
             rx.vstack(
                 cls._pace_row(
@@ -876,7 +833,7 @@ class ConfigPage:
                 margin_top="0.75em",
             ),
             rx.text(
-                PlansState.pace_hint,
+                ConfigState.pace_hint,
                 font_size="0.8em",
                 color=MUTED,
                 margin_top="0.5em",
@@ -898,9 +855,9 @@ class ConfigPage:
     def _pace_input(key: str, step: str = "0.5") -> rx.Component:
         """单个明细参数的数字输入框；非「自定义」档只读，停止输入 0.5 秒后保存。"""
         return rx.input(
-            disabled=~PlansState.pace_custom,
-            value=PlansState.pace_params[key].to_string(),
-            on_change=lambda value: PlansState.set_pace_param(key, value).debounce(
+            disabled=~ConfigState.pace_custom,
+            value=ConfigState.pace_params[key].to_string(),
+            on_change=lambda value: ConfigState.set_pace_param(key, value).debounce(
                 500
             ),
             type="number",
@@ -916,14 +873,8 @@ class ConfigPage:
     def _llm_panel(cls) -> rx.Component:
         """大模型：DeepSeek API Key、模型与连接测试。"""
         return rx.vstack(
-            rx.vstack(
-                rx.text("AI 服务", font_weight="700", font_size="1.1em", color=TEXT),
-                rx.text(
-                    "开通后即可使用 AI 岗位筛选、简历匹配与匹配度分析，所有方案共用",
-                    font_size="0.8em",
-                    color=MUTED,
-                ),
-                spacing="1",
+            cls._panel_title(
+                "AI 服务", "开通后即可使用 AI 岗位筛选、简历匹配与匹配度分析"
             ),
             cls._section(
                 "DeepSeek",
@@ -988,123 +939,4 @@ class ConfigPage:
             variant="outline",
             size="2",
             flex_shrink="0",
-        )
-
-    # --- plan manager dialog ---
-
-    @staticmethod
-    def _plan_row(plan: rx.Var, _index: rx.Var) -> rx.Component:
-        return rx.box(
-            rx.hstack(
-                rx.vstack(
-                    rx.hstack(
-                        rx.text(plan["name"], font_weight="600", color=TEXT),
-                        rx.cond(
-                            plan["is_default"],
-                            rx.badge("默认", color_scheme="blue", variant="soft", size="1"),
-                        ),
-                        rx.cond(
-                            plan["is_active"],
-                            rx.badge(
-                                "当前", color_scheme="green", variant="soft", size="1"
-                            ),
-                        ),
-                        spacing="2",
-                        align="center",
-                    ),
-                    rx.text(
-                        f"关键词：{plan['query']}",
-                        font_size="0.75em",
-                        color=MUTED,
-                    ),
-                    align="start",
-                    spacing="1",
-                    flex="1",
-                ),
-                rx.hstack(
-                    rx.button(
-                        "切换",
-                        size="1",
-                        variant="soft",
-                        on_click=PlansState.select_plan(plan["id"]),
-                    ),
-                    rx.button(
-                        "设默认",
-                        size="1",
-                        variant="outline",
-                        on_click=PlansState.set_default(plan["id"]),
-                    ),
-                    rx.button(
-                        "复制",
-                        size="1",
-                        variant="outline",
-                        on_click=PlansState.duplicate(plan["id"]),
-                    ),
-                    rx.button(
-                        "删除",
-                        size="1",
-                        color_scheme="red",
-                        variant="soft",
-                        on_click=PlansState.delete(plan["id"]),
-                    ),
-                    spacing="2",
-                ),
-                width="100%",
-                align="center",
-            ),
-            border_bottom=f"1px solid {BORDER}",
-            padding_y="0.85em",
-            width="100%",
-        )
-
-    @classmethod
-    def _plan_manager(cls) -> rx.Component:
-        return rx.dialog.root(
-            rx.dialog.content(
-                rx.dialog.title("方案管理"),
-                rx.dialog.description("切换、复制、删除方案，或给当前方案改个名字"),
-                rx.hstack(
-                    rx.input(
-                        value=PlansState.rename_draft,
-                        on_change=PlansState.set_rename_draft,
-                        placeholder="输入新名称",
-                        width="100%",
-                    ),
-                    rx.button(
-                        "重命名", on_click=PlansState.rename_active, size="2"
-                    ),
-                    width="100%",
-                    spacing="2",
-                    margin_y="0.75em",
-                ),
-                rx.cond(
-                    PlansState.error != "",
-                    rx.text(
-                        PlansState.error,
-                        color="red",
-                        font_size="0.8em",
-                        margin_bottom="0.5em",
-                    ),
-                ),
-                rx.box(
-                    rx.foreach(PlansState.plans, cls._plan_row),
-                    max_height="360px",
-                    overflow_y="auto",
-                    width="100%",
-                ),
-                rx.flex(
-                    rx.dialog.close(
-                        rx.button(
-                            "关闭", variant="soft", on_click=PlansState.close_manager
-                        ),
-                    ),
-                    justify="end",
-                    margin_top="1em",
-                    width="100%",
-                ),
-                max_width="640px",
-                width="90vw",
-            ),
-            open=PlansState.manager_open,
-            on_open_change=PlansState.set_manager_open,
         )

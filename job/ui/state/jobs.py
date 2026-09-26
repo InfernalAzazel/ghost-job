@@ -6,12 +6,13 @@ import asyncio
 import math
 
 import reflex as rx
+from pydantic_ai.exceptions import AgentRunError
 
 from job.boss.jobs import Job
 from job.boss.review import JobReviewer
 from job.models import init_db
 from job.models.job import JobRow
-from job.models.plan import SearchPlanRow
+from job.models.search import SearchConfigRow
 from job.models.setting import LlmSettings
 
 # AI 分析并发数
@@ -23,7 +24,13 @@ class JobsState(rx.State):
     total: int = 0
     search: str = ""
     analysis: str = JobRow.ANALYSIS_FILTERS[0]
-    analysis_options: list[str] = list(JobRow.ANALYSIS_FILTERS)
+    analysis_options: list[str] = rx.field(
+        default_factory=lambda: list(JobRow.ANALYSIS_FILTERS)
+    )
+    suitable: str = JobRow.SUITABLE_FILTERS[1]
+    suitable_options: list[str] = rx.field(
+        default_factory=lambda: list(JobRow.SUITABLE_FILTERS)
+    )
     page: int = 1
     page_size: int = 15
     selected: list[str] = rx.field(default_factory=list)
@@ -64,14 +71,16 @@ class JobsState(rx.State):
         return self.page < self.total_pages
 
     def _reload(self) -> None:
-        self.total = JobRow.count(search=self.search, analysis=self.analysis)
+        self.total = JobRow.count(
+            search=self.search, analysis=self.analysis, suitable=self.suitable
+        )
         max_page = max(1, math.ceil(self.total / self.page_size)) if self.page_size else 1
-        if self.page > max_page:
-            self.page = max_page
+        self.page = min(self.page, max_page)
         offset = (self.page - 1) * self.page_size
         self.rows = JobRow.list_dicts(
             search=self.search,
             analysis=self.analysis,
+            suitable=self.suitable,
             limit=self.page_size,
             offset=offset,
         )
@@ -87,15 +96,6 @@ class JobsState(rx.State):
         self._reload()
 
     @rx.event
-    def set_search(self, value: str):
-        self.search = value
-
-    @rx.event
-    def apply_search(self):
-        self.page = 1
-        self._reload()
-
-    @rx.event
     def set_search_and_reload(self, value: str):
         self.search = value
         self.page = 1
@@ -105,6 +105,13 @@ class JobsState(rx.State):
     def set_analysis(self, value: str):
         """切换分析状态筛选，回到第一页。"""
         self.analysis = value
+        self.page = 1
+        self._reload()
+
+    @rx.event
+    def set_suitable(self, value: str):
+        """切换是否合适筛选，回到第一页。"""
+        self.suitable = value
         self.page = 1
         self._reload()
 
@@ -153,21 +160,22 @@ class JobsState(rx.State):
 
     @rx.event(background=True)
     async def analyze_selected(self):
-        """用当前方案的简历，让大模型给选中岗位打匹配度并写回。"""
+        """按求职配置里的 AI 筛选要求与简历，重新判断选中岗位是否合适并写回原因与匹配度。"""
         async with self:
             if self.analyzing or not self.selected:
                 return
-            resume = str(SearchPlanRow.get_active_dict().get("resume_text") or "")
             llm = LlmSettings.load()
-            if not resume.strip():
-                return rx.toast.warning("请先在配置中心「简历配置」上传简历")
             if not llm.ready:
                 return rx.toast.warning("请先在配置中心开通「AI 服务」")
+            reviewer = JobReviewer.from_config(SearchConfigRow.load(), llm)
+            if reviewer is None:
+                return rx.toast.warning(
+                    "请先在配置中心开启「AI 岗位筛选」或「简历技术匹配」"
+                )
             uids = list(self.selected)
             self.analyzing = True
             self.analyzed = 0
 
-        reviewer = JobReviewer(resume=resume.strip(), llm=llm)
         limit = asyncio.Semaphore(_ANALYZE_CONCURRENCY)
 
         async def analyze(uid: str) -> bool:
@@ -180,9 +188,18 @@ class JobsState(rx.State):
                 salary=row["salary"],
                 description=row["description"],
             )
-            async with limit:
-                score = await reviewer.score(job)
-            ok = score is not None and JobRow.set_score(uid, score)
+            try:
+                async with limit:
+                    verdict = await reviewer.check(job)
+            except AgentRunError:
+                ok = False
+            else:
+                ok = JobRow.set_verdict(
+                    uid,
+                    suitable=verdict.match,
+                    reason=verdict.reason,
+                    score=verdict.score,
+                )
             async with self:
                 self.analyzed += 1
             return ok
@@ -194,7 +211,7 @@ class JobsState(rx.State):
             self.selected = []
             self._reload()
         if done == len(uids):
-            return rx.toast.success(f"已完成 {done} 个岗位的匹配度分析")
+            return rx.toast.success(f"已完成 {done} 个岗位的 AI 分析")
         return rx.toast.warning(f"分析完成 {done} 个，失败 {len(uids) - done} 个")
 
     @rx.event

@@ -6,14 +6,14 @@ import reflex as rx
 
 from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
-from job.ui.state import JobsState
+from job.ui.state.jobs import JobsState
 from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
 
 
 class JobsPage:
     """岗位管理：表格浏览、搜索、详情、删除、勾选后 AI 分析匹配度。"""
 
-    PAGE_SIZE_OPTIONS = ["15 / page", "30 / page", "50 / page"]
+    PAGE_SIZE_OPTIONS = ("15 / page", "30 / page", "50 / page")
     # 操作列宽度（表头与数据行对齐）
     ACTION_WIDTH = "170px"
 
@@ -49,6 +49,13 @@ class JobsPage:
             rx.text("岗位数据", font_weight="700", font_size="1.05em", color=TEXT),
             rx.cond(JobsState.selected_count > 0, cls._selection_bar()),
             rx.spacer(),
+            rx.select(
+                JobsState.suitable_options,
+                value=JobsState.suitable,
+                on_change=JobsState.set_suitable,
+                size="2",
+                width="110px",
+            ),
             rx.select(
                 JobsState.analysis_options,
                 value=JobsState.analysis,
@@ -145,7 +152,7 @@ class JobsPage:
             rx.cond(
                 JobsState.rows.length() == 0,
                 rx.center(
-                    rx.text("暂无岗位数据，请先在工作台自动投递", color=MUTED),
+                    rx.text("暂无岗位数据，请先在工作台开始自动投递", color=MUTED),
                     width="100%",
                     padding_y="3em",
                 ),
@@ -176,6 +183,8 @@ class JobsPage:
             ),
             rx.text("岗位名称", font_size="0.8em", color=MUTED, font_weight="600", flex="1.4"),
             rx.text("公司", font_size="0.8em", color=MUTED, font_weight="600", flex="1"),
+            rx.text("是否合适", font_size="0.8em", color=MUTED, font_weight="600", width="72px"),
+            rx.text("判断描述", font_size="0.8em", color=MUTED, font_weight="600", flex="1.4"),
             rx.text("匹配度", font_size="0.8em", color=MUTED, font_weight="600", width="90px"),
             rx.box(
                 rx.text("操作", font_size="0.8em", color=MUTED, font_weight="600"),
@@ -206,6 +215,15 @@ class JobsPage:
         )
 
     @staticmethod
+    def _suitable_badge(suitable: rx.Var) -> rx.Component:
+        """是否合适标签：合适绿色、不合适红色。"""
+        return rx.badge(
+            rx.cond(suitable, "合适", "不合适"),
+            color_scheme=rx.cond(suitable, "green", "red"),
+            variant="soft",
+        )
+
+    @staticmethod
     def _data_row(job: rx.Var, _index: rx.Var) -> rx.Component:
         return rx.hstack(
             rx.checkbox(
@@ -223,6 +241,27 @@ class JobsPage:
                 min_width="0",
             ),
             rx.text(job["company"], font_size="0.85em", color=TEXT, flex="1", min_width="0"),
+            rx.box(JobsPage._suitable_badge(job["suitable"]), width="72px"),
+            rx.box(
+                rx.cond(
+                    job["reason"] != "",
+                    rx.tooltip(
+                        rx.text(
+                            job["reason"],
+                            font_size="0.8em",
+                            color=MUTED,
+                            overflow="hidden",
+                            text_overflow="ellipsis",
+                            white_space="nowrap",
+                        ),
+                        content=job["reason"],
+                        max_width="360px",
+                    ),
+                    rx.text("—", font_size="0.8em", color=MUTED),
+                ),
+                flex="1.4",
+                min_width="0",
+            ),
             rx.badge(
                 job["matchStatus"],
                 color_scheme=rx.cond(job["matchHigh"], "green", "gray"),
@@ -283,7 +322,7 @@ class JobsPage:
                 align="center",
             ),
             rx.select(
-                cls.PAGE_SIZE_OPTIONS,
+                list(cls.PAGE_SIZE_OPTIONS),
                 value=JobsState.page_label,
                 on_change=JobsState.set_page_size,
                 size="1",
@@ -363,6 +402,25 @@ class JobsPage:
                     f"{JobsState.detail['salary']} · {JobsState.detail['company']} · {JobsState.detail['location']}"
                 ),
                 rx.vstack(
+                    rx.hstack(
+                        JobsPage._suitable_badge(JobsState.detail["suitable"]),
+                        rx.text(JobsState.detail["reason"], font_size="0.85em", color=TEXT),
+                        spacing="2",
+                        align="center",
+                    ),
+                    rx.cond(
+                        JobsState.detail["suitable"],
+                        rx.text(
+                            f"投递状态：{JobsState.detail['result']}",
+                            font_size="0.85em",
+                            color=MUTED,
+                        ),
+                    ),
+                    rx.text(
+                        f"入库时间：{JobsState.detail['createdAt']}",
+                        font_size="0.85em",
+                        color=MUTED,
+                    ),
                     rx.cond(
                         JobsState.detail["hrName"] != "",
                         rx.text(

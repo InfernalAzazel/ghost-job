@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, PromptedOutput
-from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 
@@ -22,7 +21,9 @@ class Verdict(BaseModel):
     """岗位复核结论。"""
 
     match: bool = Field(description="岗位是否通过全部复核项")
-    reason: str = Field(description="20 字以内的中文理由，不通过时说明是哪一项")
+    reason: str = Field(
+        description="20 字以内的中文理由：通过时说明为什么合适，不通过时说明哪一项不满足"
+    )
     score: int | None = Field(
         default=None,
         ge=0,
@@ -59,17 +60,17 @@ class JobReviewer(BaseModel):
     timeout: float = 30
 
     @classmethod
-    def from_plan(
-        cls, plan: Mapping[str, Any], llm: LlmSettings
+    def from_config(
+        cls, config: Mapping[str, Any], llm: LlmSettings
     ) -> JobReviewer | None:
-        """方案开启了至少一项复核（且内容非空）时返回复核器，否则返回 None。"""
-        requirement = str(plan.get("ai_requirement") or "").strip()
-        resume = str(plan.get("resume_text") or "").strip()
-        requirement = requirement if plan.get("ai_review") else ""
-        resume = resume if plan.get("resume_match") else ""
+        """求职配置开启了至少一项复核（且内容非空）时返回复核器，否则返回 None。"""
+        requirement = str(config.get("ai_requirement") or "").strip()
+        resume = str(config.get("resume_text") or "").strip()
+        requirement = requirement if config.get("ai_review") else ""
+        resume = resume if config.get("resume_match") else ""
         if not requirement and not resume:
             return None
-        min_score = plan.get("min_score") if plan.get("score_filter") else None
+        min_score = config.get("min_score") if config.get("score_filter") else None
         return cls(
             requirement=requirement, resume=resume, min_score=min_score, llm=llm
         )
@@ -110,30 +111,18 @@ class JobReviewer(BaseModel):
             ),
         )
 
-    async def check(self, job: Job) -> tuple[str, int | None]:
-        """返回 (跳过原因, 匹配度)。
+    async def check(self, job: Job) -> Verdict:
+        """复核岗位：是否合适、原因与匹配度（含最低匹配度判断）。
 
-        通过时原因为空串；未开启简历技术匹配时匹配度为 None。
+        未开启简历技术匹配时匹配度为 None；接口出错时抛 ``AgentRunError``。
         """
-        try:
-            verdict = await self.review(job)
-        except AgentRunError as exc:
-            return f"AI 复核失败：{exc}", None
+        verdict = await self.review(job)
         score = verdict.score if self.resume else None
-        if not verdict.match:
-            return f"AI 复核不通过：{verdict.reason}", score
-        if score is not None and self.min_score is not None and score < self.min_score:
-            return f"匹配度 {score} 分，低于 {self.min_score} 分", score
-        return "", score
-
-    async def score(self, job: Job) -> int | None:
-        """只取简历技术匹配度；未提供简历或调用失败返回 None。"""
-        if not self.resume:
-            return None
-        try:
-            return (await self.review(job)).score
-        except AgentRunError:
-            return None
+        low = score is not None and self.min_score is not None and score < self.min_score
+        if verdict.match and low:
+            reason = f"匹配度 {score} 分，低于 {self.min_score} 分"
+            return Verdict(match=False, reason=reason, score=score)
+        return verdict.model_copy(update={"score": score})
 
     async def review(self, job: Job) -> Verdict:
         """调用模型给出结论；接口出错或输出不合规时抛 ``AgentRunError``。"""
