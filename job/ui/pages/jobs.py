@@ -88,6 +88,7 @@ class JobsPage:
                 border_radius="8px",
                 padding_x="0.6em",
             ),
+            rx.cond(JobsState.selected_count == 0, cls._export_button("导出全部")),
             width="100%",
             align="center",
             spacing="3",
@@ -97,14 +98,30 @@ class JobsPage:
         )
 
     @staticmethod
-    def _selection_bar() -> rx.Component:
-        """勾选后出现：已选数量、AI 分析、批量删除、取消选择。"""
+    def _export_button(label: str) -> rx.Component:
+        """导出 CSV：没勾选时导出全部，勾选后只导出选中的。"""
+        return rx.button(
+            rx.icon("download", size=14),
+            label,
+            on_click=JobsState.export_csv,
+            variant="outline",
+            size="2",
+        )
+
+    @classmethod
+    def _selection_bar(cls) -> rx.Component:
+        """勾选后出现：已选数量（点 × 取消选择）、AI 分析、导出、批量删除。"""
         return rx.hstack(
-            rx.text(
-                f"已选 {JobsState.selected_count} 项",
-                font_size="0.85em",
-                color=ACCENT,
-                font_weight="600",
+            rx.tooltip(
+                rx.button(
+                    f"已选 {JobsState.selected_count} 项",
+                    rx.icon("x", size=14),
+                    on_click=JobsState.clear_selection,
+                    disabled=JobsState.analyzing,
+                    variant="soft",
+                    size="2",
+                ),
+                content="取消选择",
             ),
             rx.button(
                 rx.icon("sparkles", size=14),
@@ -118,6 +135,7 @@ class JobsPage:
                 size="2",
                 style={"background": ACCENT, "color": "white"},
             ),
+            cls._export_button("导出"),
             rx.button(
                 rx.icon("trash-2", size=14),
                 "批量删除",
@@ -125,14 +143,6 @@ class JobsPage:
                 disabled=JobsState.analyzing,
                 color_scheme="red",
                 variant="soft",
-                size="2",
-            ),
-            rx.button(
-                "取消选择",
-                on_click=JobsState.clear_selection,
-                disabled=JobsState.analyzing,
-                variant="ghost",
-                color_scheme="gray",
                 size="2",
             ),
             spacing="3",

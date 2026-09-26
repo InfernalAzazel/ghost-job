@@ -14,11 +14,13 @@ from job.boss.filters import (
     JobType,
     Pace,
     PaceProfile,
+    ReplyPaceProfile,
     Salary,
     Scale,
 )
 from job.models import init_db
 from job.models.search import DEFAULT_MIN_SCORE, LIST_FIELDS, SearchConfigRow
+from job.models.setting import AutoReplySettings, LlmSettings
 from job.utils.resume import ResumePdf
 
 
@@ -49,9 +51,15 @@ class ConfigState(rx.State):
     resume_path: str = ""
     resume_text: str = ""
     resume_hint: str = ""
+    auto_reply: bool = False
+    reply_prompt: str = AutoReplySettings.DEFAULT_PROMPT
+    reply_pace_label: str = Pace.default_label
+    reply_pace_params: dict[str, float] = rx.field(
+        default_factory=lambda: ReplyPaceProfile().model_dump()
+    )
     # 配置中心左侧当前菜单：search / llm
     section: str = "search"
-    # 求职配置下的标签页：filters / resume
+    # 求职配置下的标签页：filters / resume / reply
     search_tab: str = "filters"
     # 当前展开的下拉多选字段与搜索词
     combo_open: str = ""
@@ -104,6 +112,17 @@ class ConfigState(rx.State):
         text = PaceProfile.model_validate(self.pace_params).describe()
         return text if self.pace_custom else f"{text}；选择「自定义」可自行调整"
 
+    @rx.var
+    def reply_pace_custom(self) -> bool:
+        """回复节奏是否「自定义」档（只有此时明细可改）。"""
+        return Pace.code(self.reply_pace_label) == ReplyPaceProfile.CUSTOM
+
+    @rx.var
+    def reply_pace_hint(self) -> str:
+        """当前回复节奏的说明；预设档附带「切到自定义才能改」的提示。"""
+        text = ReplyPaceProfile.model_validate(self.reply_pace_params).describe()
+        return text if self.reply_pace_custom else f"{text}。选择「自定义」可自行调整"
+
     def _load(self, config: dict) -> None:
         self.query = str(config.get("query") or "")
         self.job_type_label = JobType.label(str(config.get("job_type") or ""))
@@ -143,6 +162,11 @@ class ConfigState(rx.State):
     def on_load(self):
         init_db()
         self._load(SearchConfigRow.load())
+        reply = AutoReplySettings.load()
+        self.auto_reply = reply.enabled
+        self.reply_prompt = reply.prompt
+        self.reply_pace_label = Pace.label(reply.pace)
+        self.reply_pace_params = reply.pace_profile.model_dump()
         self.save_hint = "配置已自动保存"
 
     @rx.event
@@ -248,6 +272,57 @@ class ConfigState(rx.State):
     def set_ai_requirement(self, value: str):
         self.ai_requirement = value
         self._save()
+
+    def _save_reply(self) -> None:
+        AutoReplySettings(
+            enabled=self.auto_reply,
+            prompt=self.reply_prompt,
+            pace=Pace.code(self.reply_pace_label),
+            pace_params=self.reply_pace_params,
+        ).save()
+        self.save_hint = "配置已自动保存"
+
+    @rx.event
+    def set_reply_pace(self, value: str | list[str]):
+        """切回复节奏档位：预设档把明细刷成预设值，「自定义」保留当前明细。"""
+        self.reply_pace_label = value if isinstance(value, str) else value[0]
+        code = Pace.code(self.reply_pace_label)
+        if code != ReplyPaceProfile.CUSTOM:
+            self.reply_pace_params = ReplyPaceProfile.preset(code).model_dump()
+        self._save_reply()
+
+    @rx.event
+    def set_reply_pace_param(self, key: str, value: str):
+        """改回复节奏的某个明细参数（仅「自定义」档）：校验通过就保存。"""
+        if Pace.code(self.reply_pace_label) != ReplyPaceProfile.CUSTOM:
+            return
+        try:
+            profile = ReplyPaceProfile.model_validate({**self.reply_pace_params, key: value})
+        except ValidationError:
+            self.save_hint = "请输入有效数字，停止时间需晚于开始时间"
+            return
+        self.reply_pace_params = profile.model_dump()
+        self._save_reply()
+
+    @rx.event
+    def set_auto_reply(self, value: bool):
+        """开启前检查前置条件：已开通 AI 服务、已配置简历。"""
+        if value and not LlmSettings.load().ready:
+            return rx.toast.warning("请先在「AI 服务」里开通大模型")
+        if value and not self.resume_text.strip():
+            return rx.toast.warning("请先在「简历配置」里上传简历或填写简历内容")
+        self.auto_reply = value
+        self._save_reply()
+
+    @rx.event
+    def set_reply_prompt(self, value: str):
+        self.reply_prompt = value
+        self._save_reply()
+
+    @rx.event
+    def reset_reply_prompt(self):
+        self.reply_prompt = AutoReplySettings.DEFAULT_PROMPT
+        self._save_reply()
 
     @rx.event
     def open_combo(self, field: str):

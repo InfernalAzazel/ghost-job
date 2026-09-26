@@ -157,6 +157,7 @@ class WorkbenchPage:
                 margin_top="1.1em",
                 flex_shrink="0",
             ),
+            cls._reply_section(),
             bg=CARD,
             border=f"1px solid {BORDER}",
             border_radius="16px",
@@ -170,8 +171,55 @@ class WorkbenchPage:
         )
 
     @staticmethod
+    def _reply_section() -> rx.Component:
+        """自动回复：状态 + 开始 / 停止；和投递共用浏览器，可同时进行。"""
+        return rx.box(
+            rx.hstack(
+                rx.heading("自动回复", size="4", color=TEXT),
+                rx.spacer(),
+                rx.badge(
+                    BossState.reply_state,
+                    color_scheme=rx.cond(BossState.reply_busy, "green", "gray"),
+                    variant="soft",
+                ),
+                align="center",
+                width="100%",
+            ),
+            rx.text(
+                "HR 发来消息时，由 AI 结合简历按回复节奏自动回复，可与投递同时进行。",
+                color=MUTED,
+                font_size="0.85em",
+                margin_top="0.35em",
+            ),
+            rx.cond(
+                BossState.reply_busy,
+                rx.button(
+                    rx.icon("circle-stop", size=16),
+                    f"停止自动回复（已回复 {BossState.reply_count} 条）",
+                    on_click=BossState.stop_reply,
+                    color_scheme="red",
+                    variant="soft",
+                    width="100%",
+                    margin_top="0.85em",
+                ),
+                rx.button(
+                    rx.icon("message-circle", size=16),
+                    "开始自动回复",
+                    on_click=BossState.start_reply,
+                    variant="outline",
+                    width="100%",
+                    margin_top="0.85em",
+                ),
+            ),
+            margin_top="1.25em",
+            padding_top="1.1em",
+            border_top=f"1px solid {BORDER}",
+            flex_shrink="0",
+        )
+
+    @staticmethod
     def _log_row(entry: rx.Var) -> rx.Component:
-        """一条日志：时间 · 级别图标 · 内容；投递绿色、重复蓝灰、跳过灰色、异常橙色。"""
+        """一条日志：时间 · 级别图标 · 内容；投递绿色、重复蓝灰、跳过灰色、异常橙色、收到蓝色、回复青色。"""
         level = entry["level"]
         icon = rx.match(
             level,
@@ -179,6 +227,8 @@ class WorkbenchPage:
             ("dup", rx.icon("copy", size=14, color="#98a2b3")),
             ("skip", rx.icon("circle-minus", size=14, color="#98a2b3")),
             ("warn", rx.icon("triangle-alert", size=14, color="#f79009")),
+            ("recv", rx.icon("message-circle", size=14, color=ACCENT)),
+            ("reply", rx.icon("reply", size=14, color="#0e9384")),
             rx.icon("info", size=14, color=ACCENT),
         )
         tag = rx.match(
@@ -187,6 +237,8 @@ class WorkbenchPage:
             ("dup", rx.badge("重复", color_scheme="indigo", variant="soft", size="1")),
             ("skip", rx.badge("跳过", color_scheme="gray", variant="soft", size="1")),
             ("warn", rx.badge("注意", color_scheme="orange", variant="soft", size="1")),
+            ("recv", rx.badge("收到", color_scheme="blue", variant="soft", size="1")),
+            ("reply", rx.badge("回复", color_scheme="teal", variant="soft", size="1")),
             rx.fragment(),
         )
         return rx.hstack(

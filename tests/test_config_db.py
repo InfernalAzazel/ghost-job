@@ -10,7 +10,7 @@ import pytest
 from job import models as models_pkg
 from job.models import init_db, reset_engine
 from job.models.search import SearchConfigRow
-from job.models.setting import LlmSettings
+from job.models.setting import AutoReplySettings, LlmSettings
 
 
 @pytest.fixture()
@@ -102,3 +102,21 @@ def test_llm_settings_save_and_load(tmp_db: Path):
     )
     latest.save()
     assert LlmSettings.load() == latest
+
+
+def test_auto_reply_settings_default_and_roundtrip(tmp_db: Path):
+    default = AutoReplySettings.load()
+    assert not default.enabled
+    assert default.prompt == AutoReplySettings.DEFAULT_PROMPT
+
+    saved = AutoReplySettings(
+        enabled=True,
+        prompt="  语气轻松一点  ",
+        pace="custom",
+        pace_params={"start_hour": 10, "end_hour": 18},
+    )
+    saved.save()
+    loaded = AutoReplySettings.load()
+    assert loaded == saved and loaded.prompt == "语气轻松一点"
+    assert (loaded.pace_profile.start_hour, loaded.pace_profile.end_hour) == (10, 18)
+    assert LlmSettings.load() == LlmSettings()

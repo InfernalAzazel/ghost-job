@@ -1,9 +1,12 @@
-"""岗位管理状态：列表、筛选、勾选、删除与 AI 匹配度分析。"""
+"""岗位管理状态：列表、筛选、勾选、删除、导出与 AI 匹配度分析。"""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import math
+from datetime import datetime
+from pathlib import Path
 
 import reflex as rx
 from pydantic_ai.exceptions import AgentRunError
@@ -17,6 +20,13 @@ from job.models.setting import LlmSettings
 
 # AI 分析并发数
 _ANALYZE_CONCURRENCY = 4
+# 保存框回传的标记：不在桌面端，改用浏览器下载
+_BROWSER_DOWNLOAD = "__browser_download__"
+
+
+def _export_name() -> str:
+    """导出文件名，带当前时间。"""
+    return datetime.now().astimezone().strftime("岗位数据-%Y%m%d-%H%M.csv")
 
 
 class JobsState(rx.State):
@@ -42,6 +52,8 @@ class JobsState(rx.State):
     analyzing: bool = False
     # AI 分析进度：已完成数
     analyzed: int = 0
+    # 点导出时勾选的岗位；空表示导出全部
+    _export_uids: list[str] = rx.field(default_factory=list)
 
     @rx.var
     def selected_count(self) -> int:
@@ -213,6 +225,35 @@ class JobsState(rx.State):
         if done == len(uids):
             return rx.toast.success(f"已完成 {done} 个岗位的 AI 分析")
         return rx.toast.warning(f"分析完成 {done} 个，失败 {len(uids) - done} 个")
+
+    @rx.event
+    def export_csv(self):
+        """导出 CSV：有勾选导出选中的，否则导出全部；桌面端弹系统保存框选位置。"""
+        self._export_uids = list(self.selected)
+        options = {
+            "defaultPath": str(Path.home() / "Downloads" / _export_name()),
+            "filters": [{"name": "CSV", "extensions": ["csv"]}],
+        }
+        # 普通浏览器（开发调试）没有 Tauri 对话框，回传标记改用浏览器下载
+        script = (
+            f"window.__TAURI__?.dialog ? window.__TAURI__.dialog.save({json.dumps(options)})"
+            f" : {json.dumps(_BROWSER_DOWNLOAD)}"
+        )
+        return rx.call_script(script, callback=JobsState.save_csv)
+
+    @rx.event
+    def save_csv(self, path: str | None):
+        """把 CSV 写到保存框选中的路径；取消时 ``path`` 为空。"""
+        if not path:
+            return
+        text, count = JobRow.to_csv(self._export_uids or None)
+        if path == _BROWSER_DOWNLOAD:
+            return rx.download(data=text, filename=_export_name())
+        try:
+            Path(path).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            return rx.toast.error(f"导出失败：{exc.strerror or exc}")
+        return rx.toast.success(f"已导出 {count} 个岗位到 {path}")
 
     @rx.event
     def open_detail(self, uid: str):

@@ -8,7 +8,7 @@ from job.ui.theme import ACCENT, MUTED, TEXT
 
 
 def site_header(*, active: str) -> rx.Component:
-    """active: 'workbench' | 'jobs' | 'config'."""
+    """active: 'workbench' | 'jobs' | 'messages' | 'config'."""
 
     def nav_item(label: str, href: str, key: str) -> rx.Component:
         is_active = active == key
@@ -48,6 +48,7 @@ def site_header(*, active: str) -> rx.Component:
         rx.hstack(
             nav_item("工作台", "/", "workbench"),
             nav_item("岗位管理", "/jobs", "jobs"),
+            nav_item("消息", "/messages", "messages"),
             nav_item("配置中心", "/config", "config"),
             spacing="5",
             align="center",

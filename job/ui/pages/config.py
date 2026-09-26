@@ -38,6 +38,7 @@ class ConfigPage:
     TABS = (
         ("filters", "layout-grid", "岗位筛选"),
         ("resume", "file-text", "简历配置"),
+        ("reply", "message-circle", "自动回复"),
     )
 
     # 简历 PDF 上传控件 id
@@ -159,9 +160,10 @@ class ConfigPage:
                 border_bottom=f"1px solid {BORDER}",
             ),
             rx.box(
-                rx.cond(
-                    ConfigState.search_tab == "resume",
-                    cls._resume_form(),
+                rx.match(
+                    ConfigState.search_tab,
+                    ("resume", cls._resume_form()),
+                    ("reply", cls._reply_form()),
                     cls._filters_form(),
                 ),
                 padding_top="1.25em",
@@ -391,6 +393,103 @@ class ConfigPage:
             overflow_y="auto",
             padding_right="0.35em",
             padding_bottom="0.5em",
+        )
+
+    # --- auto reply ---
+
+    @classmethod
+    def _reply_form(cls) -> rx.Component:
+        """自动回复：启用开关 + 前置条件 + 回复提示词 + 回复节奏。"""
+        return rx.vstack(
+            form_title(
+                "message-circle",
+                "自动回复",
+                "HR 发来消息时，由 AI 结合你的简历自动回复",
+            ),
+            cls._switch_card(
+                "启用自动回复",
+                "开启后，AI 会按下方提示词和你的简历回复 HR 的消息",
+                ConfigState.auto_reply,
+                ConfigState.set_auto_reply,
+                rx.vstack(
+                    cls._requirement(
+                        "已开通 AI 服务",
+                        LlmState.key_ready,
+                        "去开通",
+                        ConfigState.set_section("llm"),
+                    ),
+                    cls._requirement(
+                        "已配置简历",
+                        ConfigState.resume_text != "",
+                        "去上传",
+                        ConfigState.set_search_tab("resume"),
+                    ),
+                    spacing="1",
+                    padding_top="0.35em",
+                ),
+            ),
+            rx.box(
+                rx.hstack(
+                    cls._field_label("回复提示词"),
+                    rx.spacer(),
+                    rx.link(
+                        "恢复默认",
+                        on_click=ConfigState.reset_reply_prompt,
+                        font_size="0.8em",
+                        cursor="pointer",
+                    ),
+                    align="center",
+                    width="100%",
+                ),
+                rx.text_area(
+                    value=ConfigState.reply_prompt,
+                    on_change=ConfigState.set_reply_prompt.debounce(500),
+                    placeholder="告诉 AI 用什么语气、按什么原则回复 HR",
+                    width="100%",
+                    min_height="220px",
+                    resize="vertical",
+                ),
+                rx.text(
+                    "简历内容会自动附带给 AI，这里只需写回复的语气和原则",
+                    font_size="0.8em",
+                    color=MUTED,
+                    margin_top="0.35em",
+                ),
+                width="100%",
+            ),
+            cls._section(
+                "回复节奏",
+                cls._reply_pace_section(),
+                hint="像真人一样回复：不在半夜回消息，也不秒回",
+            ),
+            width="100%",
+            height="100%",
+            align="start",
+            spacing="5",
+            flex="1",
+            min_height="0",
+            overflow_y="auto",
+            padding_right="0.35em",
+            padding_bottom="0.5em",
+        )
+
+    @staticmethod
+    def _requirement(label: str, done: rx.Var, action: str, on_click) -> rx.Component:
+        """前置条件一行：满足显示绿勾，否则显示灰圈和去完成的链接。"""
+        return rx.hstack(
+            rx.cond(
+                done,
+                rx.icon("circle-check", size=15, color="#12b76a"),
+                rx.icon("circle", size=15, color=MUTED),
+            ),
+            rx.text(label, font_size="0.85em", color=rx.cond(done, TEXT, MUTED)),
+            rx.cond(
+                done,
+                rx.fragment(),
+                rx.link(action, on_click=on_click, font_size="0.85em", cursor="pointer"),
+            ),
+            spacing="2",
+            align="center",
         )
 
     @classmethod
@@ -852,20 +951,81 @@ class ConfigPage:
         """参数行里的说明文字。"""
         return rx.text(text, font_size="0.85em", color=TEXT)
 
+    @classmethod
+    def _pace_input(cls, key: str, step: str = "0.5") -> rx.Component:
+        """投递节奏的明细参数输入框。"""
+        return cls._param_input(
+            ConfigState.pace_params,
+            ConfigState.set_pace_param,
+            ConfigState.pace_custom,
+            key,
+            step,
+        )
+
+    @classmethod
+    def _reply_pace_input(cls, key: str, step: str = "1") -> rx.Component:
+        """回复节奏的明细参数输入框。"""
+        return cls._param_input(
+            ConfigState.reply_pace_params,
+            ConfigState.set_reply_pace_param,
+            ConfigState.reply_pace_custom,
+            key,
+            step,
+        )
+
     @staticmethod
-    def _pace_input(key: str, step: str = "0.5") -> rx.Component:
+    def _param_input(
+        params: rx.Var, on_param, editable: rx.Var, key: str, step: str
+    ) -> rx.Component:
         """单个明细参数的数字输入框；非「自定义」档只读，停止输入 0.5 秒后保存。"""
         return rx.input(
-            disabled=~ConfigState.pace_custom,
-            value=ConfigState.pace_params[key].to_string(),
-            on_change=lambda value: ConfigState.set_pace_param(key, value).debounce(
-                500
-            ),
+            disabled=~editable,
+            value=params[key].to_string(),
+            on_change=lambda value: on_param(key, value).debounce(500),
             type="number",
             min="0",
             step=step,
             size="1",
             width="72px",
+        )
+
+    @classmethod
+    def _reply_pace_section(cls) -> rx.Component:
+        """回复节奏：预设档位 + 明细参数（仅「自定义」档可改）。"""
+        num, unit = cls._reply_pace_input, cls._pace_unit
+        return rx.box(
+            rx.segmented_control.root(
+                rx.foreach(
+                    ConfigState.pace_options,
+                    lambda label: rx.segmented_control.item(label, value=label),
+                ),
+                value=ConfigState.reply_pace_label,
+                on_change=ConfigState.set_reply_pace,
+            ),
+            rx.vstack(
+                cls._pace_row(
+                    unit("每天"), num("start_hour"), unit("点到"), num("end_hour"),
+                    unit("点之间回复"),
+                ),
+                cls._pace_row(
+                    unit("收到消息后等"), num("delay_min", step="5"), unit("–"),
+                    num("delay_max", step="5"), unit("秒再回复"),
+                ),
+                cls._pace_row(
+                    unit("每回复"), num("rest_every"), unit("条歇"),
+                    num("rest_min"), unit("–"), num("rest_max"),
+                    unit("分钟（0 条表示不歇）"),
+                ),
+                spacing="2",
+                margin_top="0.75em",
+            ),
+            rx.text(
+                ConfigState.reply_pace_hint,
+                font_size="0.8em",
+                color=MUTED,
+                margin_top="0.5em",
+            ),
+            width="100%",
         )
 
     # --- llm panel ---

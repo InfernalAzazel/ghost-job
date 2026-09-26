@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import random
 from collections.abc import Mapping, Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, ClassVar
 from urllib.parse import urlencode
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from job.boss.city_codes import CITY_OPTIONS
 from job.boss.industry_codes import INDUSTRY_GROUPS, INDUSTRY_OPTIONS
@@ -307,6 +307,102 @@ class PaceProfile(BaseModel):
     def _span(span: tuple[float, float]) -> str:
         """(3, 8) → "3–8"。"""
         return f"{span[0]:g}–{span[1]:g}"
+
+
+class ReplyPaceProfile(BaseModel):
+    """自动回复节奏：只在回复时段内回复，收到消息后随机等一会儿，回复几条歇一次；默认值即「正常」。"""
+
+    model_config = ConfigDict(frozen=True)
+
+    CUSTOM: ClassVar[str] = PaceProfile.CUSTOM
+    # 预设速率码（与投递节奏同一套档位）→ 与默认值不同的参数
+    PRESETS: ClassVar[dict[str, dict[str, float]]] = {
+        "slow": {
+            "start_hour": 9,
+            "end_hour": 21,
+            "delay_min": 120,
+            "delay_max": 600,
+            "rest_every": 5,
+            "rest_min": 10,
+            "rest_max": 30,
+        },
+        "normal": {},
+        "fast": {
+            "start_hour": 8,
+            "end_hour": 23,
+            "delay_min": 10,
+            "delay_max": 60,
+            "rest_every": 0,
+        },
+    }
+
+    # 每天几点开始回复
+    start_hour: int = Field(9, ge=0, le=23)
+    # 每天几点停止回复（不含该整点）
+    end_hour: int = Field(22, ge=1, le=24)
+    # 收到消息后最少等多久再回（秒）
+    delay_min: float = Field(30, ge=0, le=3600)
+    # 收到消息后最多等多久再回（秒）
+    delay_max: float = Field(180, ge=0, le=3600)
+    # 每回复多少条歇一次（0 表示不歇）
+    rest_every: int = Field(10, ge=0, le=1000)
+    # 歇一次最少多久（分钟）
+    rest_min: float = Field(5, ge=0, le=600)
+    # 歇一次最多多久（分钟）
+    rest_max: float = Field(15, ge=0, le=600)
+
+    @model_validator(mode="after")
+    def _check_hours(self) -> ReplyPaceProfile:
+        if self.end_hour <= self.start_hour:
+            raise ValueError("停止回复的时间需晚于开始时间")
+        return self
+
+    @classmethod
+    def preset(cls, code: str) -> ReplyPaceProfile:
+        """预设速率码 → 节奏；未知码按「正常」。"""
+        return cls(**cls.PRESETS.get(code, {}))
+
+    @classmethod
+    def from_saved(cls, code: str, params: Mapping[str, Any]) -> ReplyPaceProfile:
+        """保存的档位与明细 → 节奏：自定义读明细，否则按预设；明细不合法退回「正常」。"""
+        if code != cls.CUSTOM:
+            return cls.preset(code)
+        try:
+            return cls.model_validate(params)
+        except ValidationError:
+            return cls()
+
+    def is_active(self, now: datetime) -> bool:
+        """``now`` 是否在回复时段内。"""
+        return self.start_hour <= now.hour < self.end_hour
+
+    def next_active(self, now: datetime) -> datetime:
+        """下一次可以回复的时间：时段内就是 ``now``，否则是下一个开始整点。"""
+        if self.is_active(now):
+            return now
+        start = now.replace(hour=self.start_hour, minute=0, second=0, microsecond=0)
+        return start if now < start else start + timedelta(days=1)
+
+    @property
+    def delay(self) -> tuple[float, float]:
+        """收到消息后的等待区间（秒）。"""
+        return PaceProfile._sorted(self.delay_min, self.delay_max)
+
+    @property
+    def rest(self) -> tuple[float, float]:
+        """歇一次的时长区间（分钟）。"""
+        return PaceProfile._sorted(self.rest_min, self.rest_max)
+
+    def describe(self) -> str:
+        """给配置页看的一句话说明。"""
+        span = PaceProfile._span
+        text = (
+            f"每天 {self.start_hour}:00–{self.end_hour}:00 回复，"
+            f"收到消息后等 {span(self.delay)} 秒再回"
+        )
+        if self.rest_every:
+            text += f"，每回 {self.rest_every} 条歇 {span(self.rest)} 分钟"
+        return text + "；其他时间收到的消息顺延到下一个回复时段"
 
 
 class Defaults:

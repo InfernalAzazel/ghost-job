@@ -8,6 +8,7 @@ import reflex as rx
 from patchright.async_api import Error as PlaywrightError
 from sqlalchemy.exc import SQLAlchemyError
 
+from job.boss.chat import ChatReplier, ChatResponder
 from job.boss.filters import KeywordFilter, PaceProfile, SearchUrl
 from job.boss.jobs import JobScraper
 from job.boss.review import JobReviewer
@@ -15,10 +16,11 @@ from job.boss.session import BossSession
 from job.models import init_db
 from job.models.job import JobRow
 from job.models.search import SearchConfigRow
-from job.models.setting import LlmSettings
+from job.models.setting import AutoReplySettings, LlmSettings
 
 _session = BossSession()
 _scraper = JobScraper(_session)
+_responder = ChatResponder(_session)
 
 # 投递结束状态 → 状态文案
 _STATUS = {
@@ -41,7 +43,12 @@ _MAX_LOG = 200
 class BossState(rx.State):
     boss_state: str = "空闲"
     busy: bool = False
-    # 运行日志（新的在前）：{time, level, text}，level 为 info / ok / dup / skip / warn
+    # 自动回复是否运行中、状态文案与本次回复条数
+    reply_busy: bool = False
+    reply_state: str = "未开启"
+    reply_count: int = 0
+    # 运行日志（新的在前）：{time, level, text}
+    # level 为 info / ok 投递 / dup 重复 / skip 跳过 / warn / recv 收到消息 / reply 已回复
     log: list[dict[str, str]] = rx.field(default_factory=list)
     stored_count: int = 0
     session_count: int = 0
@@ -83,10 +90,75 @@ class BossState(rx.State):
 
     @rx.event
     async def close_boss(self):
+        _scraper.request_stop()
+        _responder.request_stop()
         await _session.close()
         self.boss_state = "空闲"
         self.busy = False
+        self.reply_state = "未开启"
+        self.reply_busy = False
         self._push_log("浏览器已关闭")
+
+    @rx.event
+    def stop_reply(self):
+        _responder.request_stop()
+        self._push_log("正在停止自动回复")
+        self.reply_state = "停止中"
+
+    @rx.event(background=True)
+    async def start_reply(self):
+        """在浏览器里另开标签页守着聊天页，按「自动回复」配置回复 HR 的新消息。"""
+        async with self:
+            if self.reply_busy:
+                return
+            settings = AutoReplySettings.load()
+            llm = LlmSettings.load()
+            config = SearchConfigRow.load()
+            resume = str(config.get("resume_text") or "").strip()
+            problem = (
+                "请先在「求职配置 → 自动回复」开启自动回复" if not settings.enabled
+                else "请先在配置中心开通「AI 服务」" if not llm.ready
+                else "请先在「简历配置」上传简历" if not resume
+                else ""
+            )
+            if problem:
+                self._push_log(problem, "warn")
+                self.reply_state = "待完善配置"
+                return
+            pace = settings.pace_profile
+            replier = ChatReplier(prompt=settings.prompt, resume=resume, llm=llm)
+            self.reply_busy = True
+            self.reply_state = "回复中"
+            self.reply_count = 0
+            self._push_log(f"开始自动回复：{pace.describe()}")
+            if not _session.is_open:
+                self._push_log("正在打开浏览器…")
+
+        async def on_log(level: str, text: str) -> None:
+            async with self:
+                if level == "reply":
+                    self.reply_count += 1
+                self._push_log(text, level)
+
+        try:
+            state = await _responder.run(
+                replier,
+                pace=pace,
+                keywords=KeywordFilter.from_config(config),
+                reviewer=JobReviewer.from_config(config, llm),
+                on_log=on_log,
+            )
+            async with self:
+                if state == "need_login":
+                    self._push_log("需要登录 BOSS，请在浏览器里登录后重新开始", "warn")
+                self._push_log(f"自动回复已停止：本次回复 {self.reply_count} 条")
+                self.reply_state = "需要登录" if state == "need_login" else "未开启"
+                self.reply_busy = False
+        except (RuntimeError, PlaywrightError, SQLAlchemyError) as exc:
+            async with self:
+                self.reply_state = "出错"
+                self._push_log(str(exc), "warn")
+                self.reply_busy = False
 
     @rx.event(background=True)
     async def start_apply(self):
