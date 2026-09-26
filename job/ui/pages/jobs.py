@@ -54,14 +54,14 @@ class JobsPage:
                 value=JobsState.suitable,
                 on_change=JobsState.set_suitable,
                 size="2",
-                width="110px",
+                width="96px",
             ),
             rx.select(
                 JobsState.analysis_options,
                 value=JobsState.analysis,
                 on_change=JobsState.set_analysis,
                 size="2",
-                width="150px",
+                width="136px",
             ),
             rx.box(
                 rx.hstack(
@@ -72,7 +72,7 @@ class JobsPage:
                         placeholder="搜索岗位或公司",
                         variant="soft",
                         color_scheme="gray",
-                        width="220px",
+                        width="180px",
                         size="2",
                         style={
                             "background": "transparent",

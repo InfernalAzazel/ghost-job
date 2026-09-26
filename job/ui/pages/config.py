@@ -23,7 +23,7 @@ class ConfigPage:
         "outline": "none",
         "background": "transparent",
         "flex": "1",
-        "min_width": "120px",
+        "min_width": "48px",
         "font_size": "0.9em",
     }
 

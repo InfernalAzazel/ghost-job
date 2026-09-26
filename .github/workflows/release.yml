@@ -149,6 +149,20 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Build release notes
+        run: |
+          {
+            echo "下载与你系统对应的安装包即可使用；运行前请确保已安装 Google Chrome。"
+            notes=".github/release-notes/${GITHUB_REF_NAME}.md"
+            if [[ -f "$notes" ]]; then
+              echo
+              cat "$notes"
+            fi
+          } > release-notes.md
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -161,7 +175,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: Ghost Job ${{ github.ref_name }}
-          body: 下载与你系统对应的安装包即可使用；运行前请确保已安装 Google Chrome。
+          body_path: release-notes.md
           prerelease: false
           generate_release_notes: true
           files: artifacts/**
