@@ -8,7 +8,7 @@
 
 按你的求职方向自动筛选岗位，AI 对比简历判断匹配度，只把简历投给真正合适的公司。
 
-[下载安装](https://github.com/InfernalAzazel/ghost-job/releases) · [快速开始](#快速开始) · [常见问题](#常见问题)
+[下载安装](https://github.com/InfernalAzazel/ghost-job/releases) · [快速开始](#快速开始) · [常见问题](#常见问题) · [加入交流群](#加入交流群)
 
 </div>
 
@@ -180,6 +180,12 @@ BOSS 直聘每天约 150 次沟通上限，Ghost Job 会在达到上限时自动
 
 **我的数据存在哪里？**
 全部在本机 `~/.ghost-job/` 目录：岗位与配置在 `ghost-job.db`，简历在 `resumes/`，Chrome 登录状态在 `chrome-profile/`。
+
+## 加入交流群
+
+使用中遇到问题、有功能建议，或想和其他求职者交流经验，欢迎扫码添加作者微信，备注「Ghost Job」，拉你进交流群。
+
+<img src="assets/wechat.jpg" width="240" alt="作者微信" />
 
 ## 参与开发
 
