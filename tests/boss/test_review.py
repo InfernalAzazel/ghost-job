@@ -9,6 +9,8 @@ import pytest
 from pydantic_ai.exceptions import AgentRunError, ModelHTTPError
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.providers.deepseek import DeepSeekProvider
+from pydantic_ai.providers.openai import OpenAIProvider
 
 from job.boss.jobs import Job
 from job.boss.review import JobReviewer, Verdict
@@ -145,6 +147,17 @@ def test_api_error_raises():
 
 def test_api_key_is_trimmed():
     assert LlmSettings(api_key="  sk-1 \n").api_key == "sk-1"
+
+
+def test_provider_defaults_to_deepseek():
+    assert isinstance(LLM.provider, DeepSeekProvider)
+    assert str(LLM.provider.client.base_url).startswith(LlmSettings.DEFAULT_BASE_URL)
+
+
+def test_provider_uses_custom_base_url():
+    llm = LlmSettings(base_url=" http://localhost:11434/v1 ", api_key="k", model="qwen3")
+    assert isinstance(llm.provider, OpenAIProvider)
+    assert str(llm.provider.client.base_url) == "http://localhost:11434/v1/"
 
 
 def test_ready_needs_key_and_model():

@@ -6,6 +6,7 @@ from typing import Any, ClassVar
 
 import reflex as rx
 
+from job.models.setting import LlmSettings
 from job.ui.components.form import field_label, form_title, switch_card
 from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
@@ -871,27 +872,44 @@ class ConfigPage:
 
     @classmethod
     def _llm_panel(cls) -> rx.Component:
-        """大模型：DeepSeek API Key、模型与连接测试。"""
+        """大模型：接口地址（默认 DeepSeek）、API Key、模型与连接测试。"""
         return rx.vstack(
             cls._panel_title(
                 "AI 服务", "开通后即可使用 AI 岗位筛选、简历匹配与匹配度分析"
             ),
             cls._section(
-                "DeepSeek",
+                "大模型",
                 rx.vstack(
                     rx.box(
-                        cls._field_label("1. API Key"),
+                        cls._field_label("1. 接口地址"),
+                        rx.input(
+                            value=LlmState.base_url,
+                            on_change=LlmState.set_base_url.debounce(500),
+                            placeholder=f"留空使用 DeepSeek（{LlmSettings.DEFAULT_BASE_URL}）",
+                            width="100%",
+                        ),
+                        rx.text(
+                            "支持任意 OpenAI 兼容接口，例如通义千问、Kimi、智谱、"
+                            "OpenAI 或本地 Ollama（http://localhost:11434/v1）",
+                            font_size="0.8em",
+                            color=MUTED,
+                            margin_top="0.4em",
+                        ),
+                        width="100%",
+                    ),
+                    rx.box(
+                        cls._field_label("2. API Key"),
                         rx.input(
                             value=LlmState.api_key,
                             on_change=LlmState.set_api_key.debounce(500),
                             type="password",
-                            placeholder="粘贴你的 DeepSeek API Key，以 sk- 开头",
+                            placeholder="粘贴该服务的 API Key，DeepSeek 以 sk- 开头",
                             width="100%",
                         ),
                         width="100%",
                     ),
                     rx.box(
-                        cls._field_label("2. 模型"),
+                        cls._field_label("3. 模型"),
                         rx.hstack(
                             rx.select(
                                 LlmState.model_options,

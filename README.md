@@ -57,15 +57,16 @@
 
    > 目前已在 Windows 10 / 11 和 macOS 上测试可正常使用；**不支持 Windows 7**；Linux 版本尚未完整测试。
 2. 安装 [Google Chrome](https://www.google.com/chrome/)（自动投递通过本机 Chrome 完成）
-3. 准备一个 [DeepSeek API Key](https://platform.deepseek.com/api_keys)
+3. 准备一个大模型 API Key，推荐 [DeepSeek](https://platform.deepseek.com/api_keys)；也可以用通义千问、Kimi、智谱、OpenAI 等任意 OpenAI 兼容服务，或本地 Ollama
 
 ### 第一步：开通 AI 服务
 
 打开 **配置中心 → AI 服务**：
 
-1. 粘贴 DeepSeek API Key
-2. 点击「获取模型列表」，选择一个模型
-3. 点击「测试连接」，看到「连接成功」即可
+1. 接口地址：使用 DeepSeek 时留空即可；使用其他服务时填写它的 OpenAI 兼容地址，例如本地 Ollama 填 `http://localhost:11434/v1`
+2. 粘贴对应服务的 API Key（本地 Ollama 可随意填写）
+3. 点击「获取模型列表」，选择一个模型
+4. 点击「测试连接」，看到「连接成功」即可
 
 ![AI 服务](assets/screenshots/config-ai.png)
 

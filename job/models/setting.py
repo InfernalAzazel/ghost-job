@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic_ai.providers.deepseek import DeepSeekProvider
+from pydantic_ai.providers.openai import OpenAIProvider
 from sqlmodel import Field, SQLModel
 
 
@@ -38,13 +39,19 @@ class SettingRow(SQLModel, table=True):
 
 
 class LlmSettings(BaseModel):
-    """大模型配置：先填 API Key，再拉取可用模型并选择；存在设置表里。"""
+    """大模型配置：接口地址、API Key，再拉取可用模型并选择；存在设置表里。
+
+    接口地址为空时用 DeepSeek 官方服务，填写后按 OpenAI 兼容接口调用。
+    """
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
     # 设置表里的键前缀
     PREFIX: ClassVar[str] = "llm_"
+    # 默认服务（接口地址留空时）
+    DEFAULT_BASE_URL: ClassVar[str] = "https://api.deepseek.com"
 
+    base_url: str = ""
     api_key: str = ""
     model: str = ""
     # 上次从 DeepSeek 拉到的可用模型
@@ -74,7 +81,14 @@ class LlmSettings(BaseModel):
         }
         SettingRow.put_many(data)
 
+    @property
+    def provider(self) -> DeepSeekProvider | OpenAIProvider:
+        """模型服务：接口地址为空用 DeepSeek，否则用 OpenAI 兼容接口。"""
+        if not self.base_url:
+            return DeepSeekProvider(api_key=self.api_key)
+        return OpenAIProvider(base_url=self.base_url, api_key=self.api_key)
+
     async def fetch_models(self) -> list[str]:
-        """用当前 API Key 拉取 DeepSeek 可用模型；失败时抛 ``openai.APIError``。"""
-        client = DeepSeekProvider(api_key=self.api_key).client
+        """拉取当前服务的可用模型；失败时抛 ``openai.APIError``。"""
+        client = self.provider.client
         return sorted([m.id async for m in client.models.list()])

@@ -95,6 +95,7 @@ def test_llm_settings_save_and_load(tmp_db: Path):
     assert LlmSettings.load() == LlmSettings()
     LlmSettings(api_key="sk-1", model="deepseek-v4-pro").save()
     latest = LlmSettings(
+        base_url="https://api.moonshot.cn/v1",
         api_key="sk-2",
         model="deepseek-v4-pro",
         models=["deepseek-v4-flash", "deepseek-v4-pro"],

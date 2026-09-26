@@ -1,4 +1,4 @@
-"""AI 岗位复核：关键词过滤通过后，让 DeepSeek 按岗位详情判断意图与简历技术是否匹配。"""
+"""AI 岗位复核：关键词过滤通过后，让大模型按岗位详情判断意图与简历技术是否匹配。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
-from pydantic_ai.providers.deepseek import DeepSeekProvider
 
 from job.models.setting import LlmSettings
 
@@ -33,7 +32,7 @@ class Verdict(BaseModel):
 
 
 class JobReviewer(BaseModel):
-    """用 Pydantic AI 调 DeepSeek 复核岗位；API Key 与模型来自配置中心「大模型」。
+    """用 Pydantic AI 调大模型复核岗位；接口地址、API Key 与模型来自配置中心「AI 服务」。
 
     两项复核可单独或同时开启，同时开启时一次调用判断：
     ``requirement`` 岗位意图（目标岗位要求），``resume`` 简历技术匹配。
@@ -93,15 +92,13 @@ class JobReviewer(BaseModel):
 
     @cached_property
     def agent(self) -> Agent[None, Verdict]:
-        """DeepSeek 复核 Agent。
+        """复核 Agent；服务由配置决定（默认 DeepSeek，也可是任意 OpenAI 兼容接口）。
 
         结论走提示词 JSON 输出而非工具调用：DeepSeek 思考模式拒绝强制 ``tool_choice``，
-        而 Pydantic AI 对不认识的模型名（如 ``deepseek-flash``）无法关闭思考。
+        而 Pydantic AI 对不认识的模型名（如 ``deepseek-flash``）无法关闭思考；
+        不少兼容接口也不支持工具调用。
         """
-        model = OpenAIChatModel(
-            self.llm.model,
-            provider=DeepSeekProvider(api_key=self.llm.api_key),
-        )
+        model = OpenAIChatModel(self.llm.model, provider=self.llm.provider)
         return Agent(
             model,
             output_type=PromptedOutput(Verdict),
