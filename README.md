@@ -14,6 +14,14 @@
 
 ![工作台](assets/screenshots/workbench.png)
 
+## 自动投递效果
+
+左边是 BOSS 直聘，右边是 Ghost Job：逐个查看岗位、AI 复核、匹配度打分，合适的自动点击「立即沟通」。
+
+![自动投递效果](assets/videos/auto-apply.webp)
+
+更流畅的版本：[下载视频](assets/videos/auto-apply.mp4)
+
 ## 为什么用 Ghost Job
 
 每天刷几百个岗位、逐个点开看职责、再挨个点「立即沟通」，这些重复劳动交给 Ghost Job 就好。
