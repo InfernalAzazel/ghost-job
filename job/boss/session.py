@@ -67,13 +67,14 @@ class BossSession:
     def _launch_error(self, exc: PlaywrightError) -> str:
         """把启动异常翻译成可读的中文提示。"""
         msg = str(exc).lower()
-        if "channel" in msg or "chrome" in msg:
-            return "无法启动本机 Chrome（channel=chrome），请确认已安装 Google Chrome。"
+        # 启动失败日志几乎总会带上 chrome 可执行路径，须先识别 profile 占用。
         if any(k in msg for k in ("user data", "lock", "in use", "singleton")):
             return (
                 f"Chrome profile 被占用：{self.user_data_dir}，"
                 "请关闭其它使用该目录的 Chrome 后重试。"
             )
+        if "channel" in msg or "chrome" in msg:
+            return "无法启动本机 Chrome（channel=chrome），请确认已安装 Google Chrome。"
         return f"启动 Chrome 失败：{exc}"
 
     @staticmethod
