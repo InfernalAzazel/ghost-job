@@ -116,6 +116,10 @@ class ChatDecision(BaseModel):
         default="",
         description="要发给 HR 的回复正文，不加引号、署名或任何解释，不换行；hr_rejected 时留空",
     )
+    send_resume: bool = Field(
+        default=False,
+        description="HR 在索要简历时为 true，回复发出后会自动发送附件简历",
+    )
 
     @field_validator("reply")
     @classmethod
@@ -201,6 +205,10 @@ class ChatResponder:
     MESSAGE = ".chat-message li.message-item"
     INPUT = "#chat-input"
     SEND = ".btn-send"
+    # 工具栏的「发简历」按钮与点开后的确认面板
+    RESUME_BUTTON = ".chat-controls .toolbar-btn"
+    RESUME_PANEL = ".panel-resume"
+    RESUME_SENT = "附件简历请求已发送"
     LOGIN = ".login-dialog-wrap"
     # 职位详情页的职位描述
     DESCRIPTION = ".job-sec-text"
@@ -283,7 +291,8 @@ class ChatResponder:
                     f for f in friends if f.waiting and f.last_mid not in self._handled
                 ]
                 if pending:
-                    await self._log(f"发现 {len(pending)} 个会话有 HR 的新消息")
+                    # 最后一条是 HR 发的也可能只是系统消息（如发简历后的提示），打开后才确定
+                    log(f"检查 {len(pending)} 个最后一条来自 HR 的会话", "chat")
                 for friend in pending:
                     if self._stop.is_set():
                         break
@@ -340,6 +349,7 @@ class ChatResponder:
         for message in incoming:
             await self._log(f"{friend.label}：{message.text}", "recv")
         if not (pending := self.unanswered(messages)):
+            log(f"{friend.label} 没有待回复的消息（最后一条是系统消息），跳过", "chat")
             return
         if not incoming and friend.boss_id in ChatRejectionRow.labels():
             await self._log(f"{friend.label}（已标记为不合适，没有新消息，跳过）", "skip")
@@ -392,6 +402,11 @@ class ChatResponder:
             ChatRejectionRow.clear(friend.boss_id)
         self._replied += 1
         await self._log(f"回复 {friend.label}{'（已婉拒）' if declined else ''}：{text}", "reply")
+        if decision.send_resume:
+            if await self._send_resume(page):
+                await self._log(f"{friend.label}（已发送附件简历请求，对方确认后发到邮箱）", "reply")
+            else:
+                await self._log(f"{friend.label}（发简历失败，请手动发送）", "warn")
         await self._rest_after(self._replied)
 
     async def _open_chat(self, page: Page, friend: Friend) -> Job | None:
@@ -489,6 +504,28 @@ class ChatResponder:
             await page.locator(self.SEND).click(timeout=5_000)
             for _ in range(20):
                 if await mine.count() > before:
+                    return True
+                await page.wait_for_timeout(500)
+        except PlaywrightError:
+            return False
+        return False
+
+    async def _send_resume(self, page: Page) -> bool:
+        """点「发简历」并在弹出的面板里确定，聊天里出现「附件简历请求已发送」才算发出。
+
+        按钮不可用（双方还没互动）、面板没出现或没等到提示时返回 False。
+        """
+        button = page.locator(self.RESUME_BUTTON, has_text="发简历").first
+        panel = page.locator(self.RESUME_PANEL)
+        sent = page.locator(".message-item", has_text=self.RESUME_SENT)
+        try:
+            if "unable" in (await button.get_attribute("class", timeout=5_000) or ""):
+                return False
+            before = await sent.count()
+            await button.click(timeout=5_000)
+            await panel.locator(".btn-v2", has_text="确定").first.click(timeout=5_000)
+            for _ in range(20):
+                if await sent.count() > before:
                     return True
                 await page.wait_for_timeout(500)
         except PlaywrightError:

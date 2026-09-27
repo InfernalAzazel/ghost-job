@@ -202,7 +202,9 @@ def test_known_job_keeps_previous_verdict(tmp_db):
     assert logs == []
 
 
-def _sending_responder() -> tuple[ChatResponder, list[tuple[str, str]], list[str]]:
+def _sending_responder(
+    resume_ok: bool = True,
+) -> tuple[ChatResponder, list[tuple[str, str]], list[str]]:
     responder, logs = _responder()
     sent: list[str] = []
 
@@ -210,10 +212,15 @@ def _sending_responder() -> tuple[ChatResponder, list[tuple[str, str]], list[str
         sent.append(text)
         return True
 
+    async def send_resume(_page) -> bool:
+        sent.append("<简历>")
+        return resume_ok
+
     async def read(_page) -> list[ChatMessage]:
         return [ChatMessage(mid=f"me-{i}", from_hr=False, text=t) for i, t in enumerate(sent)]
 
     responder._send = send  # type: ignore[method-assign]
+    responder._send_resume = send_resume  # type: ignore[method-assign]
     responder._read_messages = read  # type: ignore[method-assign]
     return responder, logs, sent
 
@@ -246,6 +253,31 @@ def test_continue_reply_clears_mark(tmp_db):
     asyncio.run(responder._apply(None, friend, "job-1", decision, "换个岗位看看？"))
     assert sent == ["好的，这个岗位可以聊聊"]
     assert ChatRejectionRow.labels() == {}
+
+
+def test_resume_is_sent_after_reply_when_hr_asks(tmp_db):
+    responder, logs, sent = _sending_responder()
+    friend = Friend.model_validate(FRIEND)
+    decision = ChatDecision(outcome="continue", reply="好的，简历发您了", send_resume=True)
+    asyncio.run(responder._apply(None, friend, "job-1", decision, "方便发份简历吗"))
+    assert sent == ["好的，简历发您了", "<简历>"]
+    assert any(level == "reply" and "已发送附件简历" in text for level, text in logs)
+
+
+def test_resume_failure_asks_for_manual_send(tmp_db):
+    responder, logs, sent = _sending_responder(resume_ok=False)
+    friend = Friend.model_validate(FRIEND)
+    decision = ChatDecision(outcome="continue", reply="好的", send_resume=True)
+    asyncio.run(responder._apply(None, friend, "job-1", decision, "发下简历"))
+    assert sent == ["好的", "<简历>"]
+    assert any(level == "warn" and "手动发送" in text for level, text in logs)
+
+
+def test_resume_not_sent_by_default(tmp_db):
+    responder, _logs, sent = _sending_responder()
+    friend = Friend.model_validate(FRIEND)
+    asyncio.run(responder._apply(None, friend, "job-1", ChatDecision(outcome="continue", reply="好的"), "你好"))
+    assert sent == ["好的"]
 
 
 def test_unanswered_is_hr_messages_after_my_last():
