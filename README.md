@@ -265,6 +265,24 @@ uv run pytest -q            # 运行测试
 
 推送 `v*` 标签后，GitHub Actions 会自动打包 Windows / macOS / Linux 安装包并发布到 Releases。
 
+### 提交 PR 的规则
+
+请**先开 Issue，再提交 PR**，避免多人重复修同一个问题，或者改完才发现方向不对：
+
+1. **先开 Issue**：到 [Issues](https://github.com/InfernalAzazel/ghost-job/issues) 描述你遇到的问题，尽量包含：
+   - 做了什么操作，期望的结果和实际的结果
+   - 运行日志或终端里的报错信息（截图或复制文字都可以，注意去掉手机号、简历等个人信息）
+   - 使用的版本号和操作系统（如 v0.4.2 / macOS 15）
+   - 功能建议请说明使用场景，以及你打算怎么实现
+2. **确认后再动手**：等作者回复确认是问题、或同意这个功能方向后再开始修改
+3. **提交 PR**：
+   - 在 PR 描述里写上 `Closes #Issue 编号`，并说明改了什么、怎么验证的
+   - 一个 PR 只做一件事，不要夹带无关的格式化或重构
+   - 提交前运行 `uv run pytest -q` 确保测试通过；修复问题或新增功能请补上对应的测试
+   - 涉及界面的改动，请附上修改前后的截图
+
+错别字、文档链接失效这类很小的修改，可以直接提交 PR，不用先开 Issue。
+
 ## 许可证
 
 本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE) 许可证：个人使用、学习研究、公益与教育机构等非商业用途可以自由使用、修改和分发；**任何商业用途均不被允许**。如需商业授权，请通过 [Issues](https://github.com/InfernalAzazel/ghost-job/issues) 联系作者。
