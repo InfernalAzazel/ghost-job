@@ -238,19 +238,19 @@ class PaceProfile(BaseModel):
     }
 
     # 看完一条详情后最少停顿
-    read_min: float = Field(3, ge=0, le=600)
+    read_min: float = Field(default=3, ge=0, le=600)
     # 看完一条详情后最多停顿
-    read_max: float = Field(8, ge=0, le=600)
+    read_max: float = Field(default=8, ge=0, le=600)
     # 下滑翻页后最少停顿
-    scroll_min: float = Field(2, ge=0, le=600)
+    scroll_min: float = Field(default=2, ge=0, le=600)
     # 下滑翻页后最多停顿
-    scroll_max: float = Field(5, ge=0, le=600)
+    scroll_max: float = Field(default=5, ge=0, le=600)
     # 每投递多少条歇一次（0 表示不歇）
-    rest_every: int = Field(15, ge=0, le=1000)
+    rest_every: int = Field(default=15, ge=0, le=1000)
     # 歇一次最少多久
-    rest_min: float = Field(30, ge=0, le=600)
+    rest_min: float = Field(default=30, ge=0, le=600)
     # 歇一次最多多久
-    rest_max: float = Field(60, ge=0, le=600)
+    rest_max: float = Field(default=60, ge=0, le=600)
 
     @staticmethod
     def daily_factor(account: str, day: date | None = None) -> float:
@@ -262,7 +262,7 @@ class PaceProfile(BaseModel):
     @classmethod
     def preset(cls, code: str) -> PaceProfile:
         """预设速率码 → 节奏；未知码按「正常」。"""
-        return cls(**cls.PRESETS.get(code, {}))
+        return cls.model_validate(cls.PRESETS.get(code, {}))
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> PaceProfile:
@@ -337,19 +337,19 @@ class ReplyPaceProfile(BaseModel):
     }
 
     # 每天几点开始回复
-    start_hour: int = Field(9, ge=0, le=23)
+    start_hour: int = Field(default=9, ge=0, le=23)
     # 每天几点停止回复（不含该整点）
-    end_hour: int = Field(22, ge=1, le=24)
+    end_hour: int = Field(default=22, ge=1, le=24)
     # 收到消息后最少等多久再回（秒）
-    delay_min: float = Field(30, ge=0, le=3600)
+    delay_min: float = Field(default=30, ge=0, le=3600)
     # 收到消息后最多等多久再回（秒）
-    delay_max: float = Field(180, ge=0, le=3600)
+    delay_max: float = Field(default=180, ge=0, le=3600)
     # 每回复多少条歇一次（0 表示不歇）
-    rest_every: int = Field(10, ge=0, le=1000)
+    rest_every: int = Field(default=10, ge=0, le=1000)
     # 歇一次最少多久（分钟）
-    rest_min: float = Field(5, ge=0, le=600)
+    rest_min: float = Field(default=5, ge=0, le=600)
     # 歇一次最多多久（分钟）
-    rest_max: float = Field(15, ge=0, le=600)
+    rest_max: float = Field(default=15, ge=0, le=600)
 
     @model_validator(mode="after")
     def _check_hours(self) -> ReplyPaceProfile:
@@ -360,7 +360,7 @@ class ReplyPaceProfile(BaseModel):
     @classmethod
     def preset(cls, code: str) -> ReplyPaceProfile:
         """预设速率码 → 节奏；未知码按「正常」。"""
-        return cls(**cls.PRESETS.get(code, {}))
+        return cls.model_validate(cls.PRESETS.get(code, {}))
 
     @classmethod
     def from_saved(cls, code: str, params: Mapping[str, Any]) -> ReplyPaceProfile:

@@ -7,6 +7,7 @@ import contextlib
 import random
 from datetime import datetime
 from functools import cached_property
+from itertools import takewhile
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from patchright.async_api import Error as PlaywrightError
@@ -17,7 +18,6 @@ from pydantic import (
     ConfigDict,
     Field,
     ValidationError,
-    ValidationInfo,
     field_validator,
 )
 from pydantic_ai import Agent, PromptedOutput
@@ -52,20 +52,16 @@ class Friend(BaseModel):
     # HR 的数字 ID：最后一条消息的发送方是它，说明在等我回复
     uid: str = ""
     name: str = ""
-    title: str = ""
     company: str = Field("", validation_alias="brandName")
     job_id: str = Field("", validation_alias="encryptJobId")
-    unread: int = Field(0, validation_alias="unreadMsgCount")
     last_from: str = Field("", validation_alias=AliasPath("lastMessageInfo", "fromId"))
     last_mid: str = Field("", validation_alias=AliasPath("lastMessageInfo", "msgId"))
 
     @field_validator("*", mode="before")
     @classmethod
-    def _none_to_default(cls, value: Any, info: ValidationInfo) -> Any:
-        """接口里的 null 按默认值处理。"""
-        if value is not None:
-            return value
-        return 0 if info.field_name == "unread" else ""
+    def _none_to_empty(cls, value: Any) -> Any:
+        """接口里的 null 按空串处理。"""
+        return "" if value is None else value
 
     @property
     def waiting(self) -> bool:
@@ -78,47 +74,58 @@ class Friend(BaseModel):
         return " · ".join(p for p in (self.name, self.company) if p)
 
 
+def _validate_all[M: BaseModel](model: type[M], items: Any) -> list[M]:
+    """列表里的每一项 → ``model``；格式不对的跳过。"""
+    result = []
+    for item in items if isinstance(items, list) else []:
+        with contextlib.suppress(ValidationError):
+            result.append(model.model_validate(item))
+    return result
+
+
 def job_from_boss_data(payload: dict[str, Any]) -> Job:
     """打开会话时的 getBossData 接口 → 岗位（没有职位描述）。"""
     zp = as_dict(payload.get("zpData"))
     data, job = as_dict(zp.get("data")), as_dict(zp.get("job"))
-    return Job(
-        job_id=data.get("encryptJobId"),
-        title=job.get("jobName"),
-        salary=job.get("salaryDesc"),
-        company=job.get("brandName") or data.get("companyName"),
-        location=job.get("locationName"),
-        experience=job.get("experienceName"),
-        education=job.get("degreeName"),
-        hr_name=data.get("name"),
-        hr_title=data.get("title"),
+    return Job.model_validate(
+        {
+            "job_id": data.get("encryptJobId"),
+            "title": job.get("jobName"),
+            "salary": job.get("salaryDesc"),
+            "company": job.get("brandName") or data.get("companyName"),
+            "location": job.get("locationName"),
+            "experience": job.get("experienceName"),
+            "education": job.get("degreeName"),
+            "hr_name": data.get("name"),
+            "hr_title": data.get("title"),
+        }
     )
 
 
+# 文档字符串与字段说明会作为输出要求发给模型
 class ChatDecision(BaseModel):
-    """AI 对这次回复的判断：会话走向与要发的回复。"""
+    """这次回复的判断：会话走向与要发给 HR 的回复。"""
 
     outcome: Literal["continue", "hr_rejected", "declined"] = Field(
         description=(
-            "hr_rejected：HR 的最新消息表示我不合适、不考虑或岗位已招满；"
-            "declined：我这条回复是在婉拒这个岗位；continue：其他情况，继续沟通"
+            "hr_rejected：HR 明确表示我不合适、不考虑或岗位已招满；"
+            "declined：我按岗位判断婉拒这个岗位；continue：其他情况，继续沟通"
         )
     )
     reply: str = Field(
         default="",
-        description="要发给 HR 的回复正文，不加引号、署名或解释，不换行；hr_rejected 时留空",
+        description="要发给 HR 的回复正文，不加引号、署名或任何解释，不换行；hr_rejected 时留空",
     )
+
+    @field_validator("reply")
+    @classmethod
+    def _one_line(cls, value: str) -> str:
+        return " ".join(value.split())
 
 
 class ChatReplier(BaseModel):
     """按「自动回复」提示词、简历、岗位与聊天记录生成给 HR 的回复，并判断会话是否已结束。"""
 
-    # 追加在用户提示词后面的输出约束
-    OUTPUT_RULE: ClassVar[str] = (
-        "先判断会话走向：HR 明确表示不合适、不考虑或岗位已招满时 outcome 为 hr_rejected，"
-        "reply 留空；我按岗位判断婉拒这个岗位时 outcome 为 declined；其他情况为 continue。"
-        "reply 只写要发给 HR 的回复正文，不要加引号、署名或任何解释，不要换行。"
-    )
     # 附带给模型的最近消息条数
     HISTORY: ClassVar[int] = 20
 
@@ -133,17 +140,15 @@ class ChatReplier(BaseModel):
         return Agent(
             model,
             output_type=PromptedOutput(ChatDecision),
-            instructions=f"{self.prompt}\n\n{self.OUTPUT_RULE}",
+            instructions=self.prompt,
             model_settings=OpenAIChatModelSettings(
                 thinking=False, temperature=0.7, timeout=self.timeout
             ),
         )
 
     async def reply(self, job: Job, history: list[ChatMessage], verdict: str) -> ChatDecision:
-        """判断会话走向并生成回复（单行）；接口出错时抛 ``AgentRunError``。"""
-        result = await self.agent.run(self.build_prompt(job, history, verdict))
-        decision = result.output
-        return decision.model_copy(update={"reply": " ".join(decision.reply.split())})
+        """判断会话走向并生成回复；接口出错时抛 ``AgentRunError``。"""
+        return (await self.agent.run(self.build_prompt(job, history, verdict))).output
 
     def build_prompt(self, job: Job, history: list[ChatMessage], verdict: str) -> str:
         lines = [f"{'HR' if m.from_hr else '我'}：{m.text}" for m in history if m.text]
@@ -317,13 +322,7 @@ class ChatResponder:
     @staticmethod
     def parse_friends(items: Any) -> list[Friend]:
         """会话详情列表 → Friend；缺 HR ID 或格式不对的跳过。"""
-        friends = []
-        for item in items if isinstance(items, list) else []:
-            with contextlib.suppress(ValidationError):
-                friend = Friend.model_validate(item)
-                if friend.boss_id:
-                    friends.append(friend)
-        return friends
+        return [f for f in _validate_all(Friend, items) if f.boss_id]
 
     async def _handle(self, page: Page, friend: Friend) -> None:
         """处理一位 HR 的新消息：读取入库 → 判断岗位 → 等待 → 回复。"""
@@ -337,14 +336,10 @@ class ChatResponder:
             return
         uid = JobRow.uid_for(job) if job.job_id else ""
         messages = await self._read_messages(page)
-        fresh = ChatMessageRow.record_new(
-            messages, job_uid=uid, boss_id=friend.boss_id, hr_name=friend.name
-        )
-        incoming = [m for m in fresh if m.from_hr and m.text]
+        incoming = [m for m in self._record(messages, friend, uid) if m.from_hr and m.text]
         for message in incoming:
             await self._log(f"{friend.label}：{message.text}", "recv")
-        pending = self.unanswered(messages)
-        if not pending:
+        if not (pending := self.unanswered(messages)):
             return
         if not incoming and friend.boss_id in ChatRejectionRow.labels():
             await self._log(f"{friend.label}（已标记为不合适，没有新消息，跳过）", "skip")
@@ -365,13 +360,17 @@ class ChatResponder:
     @staticmethod
     def unanswered(messages: list[ChatMessage]) -> list[ChatMessage]:
         """我最后一条消息之后 HR 发来的消息（上次入库后没来得及回复的也算）。"""
-        tail: list[ChatMessage] = []
-        for message in reversed(messages):
-            if not message.from_hr:
-                break
-            if message.text:
-                tail.append(message)
-        return tail[::-1]
+        tail = takewhile(lambda m: m.from_hr, reversed(messages))
+        return [m for m in reversed(list(tail)) if m.text]
+
+    @staticmethod
+    def _record(
+        messages: list[ChatMessage], friend: Friend, uid: str, *, auto: bool = False
+    ) -> list[ChatMessage]:
+        """消息入库并关联岗位，返回新入库的。"""
+        return ChatMessageRow.record_new(
+            messages, job_uid=uid, boss_id=friend.boss_id, hr_name=friend.name, auto=auto
+        )
 
     async def _apply(
         self, page: Page, friend: Friend, uid: str, decision: ChatDecision, hr_text: str
@@ -385,20 +384,14 @@ class ChatResponder:
         if not text or not await self._send(page, text):
             await self._log(f"{friend.label}（发送失败，请手动回复）", "warn")
             return
-        ChatMessageRow.record_new(
-            await self._read_messages(page),
-            job_uid=uid,
-            boss_id=friend.boss_id,
-            hr_name=friend.name,
-            auto=True,
-        )
-        if decision.outcome == "declined":
+        self._record(await self._read_messages(page), friend, uid, auto=True)
+        declined = decision.outcome == "declined"
+        if declined:
             ChatRejectionRow.mark(friend.boss_id, by="me", text=text)
         else:
             ChatRejectionRow.clear(friend.boss_id)
         self._replied += 1
-        tag = "（已婉拒）" if decision.outcome == "declined" else ""
-        await self._log(f"回复 {friend.label}{tag}：{text}", "reply")
+        await self._log(f"回复 {friend.label}{'（已婉拒）' if declined else ''}：{text}", "reply")
         await self._rest_after(self._replied)
 
     async def _open_chat(self, page: Page, friend: Friend) -> Job | None:
@@ -428,14 +421,9 @@ class ChatResponder:
     async def _read_messages(self, page: Page) -> list[ChatMessage]:
         """读取当前会话里的消息（从早到晚）。"""
         try:
-            items = await page.evaluate(self.READ_JS, self.MESSAGE)
+            return _validate_all(ChatMessage, await page.evaluate(self.READ_JS, self.MESSAGE))
         except PlaywrightError:
             return []
-        messages = []
-        for item in items or []:
-            with contextlib.suppress(ValidationError):
-                messages.append(ChatMessage.model_validate(item))
-        return messages
 
     async def _judge(self, page: Page, job: Job, uid: str) -> tuple[str, Job]:
         """岗位是否合适的说明（给 AI 参考）与补全后的岗位。

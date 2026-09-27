@@ -64,14 +64,14 @@ class Job(BaseModel):
     experience: str = Field("", validation_alias="jobExperience")
     education: str = Field("", validation_alias="jobDegree")
     description: str = Field(
-        "",
+        default="",
         validation_alias=AliasChoices(
             _detail_path("jobInfo", "postDescription"),
             _detail_path("jobCard", "postDescription"),
         ),
     )
     address: str = Field(
-        "",
+        default="",
         validation_alias=AliasChoices(
             _detail_path("jobInfo", "address"),
             _detail_path("jobCard", "address"),

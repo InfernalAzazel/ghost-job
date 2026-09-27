@@ -69,7 +69,7 @@ def test_friend_tolerates_nulls():
     friend = Friend.model_validate(
         {**FRIEND, "unreadMsgCount": None, "lastMessageInfo": None, "brandName": None}
     )
-    assert friend.unread == 0 and friend.company == ""
+    assert friend.company == "" and friend.last_from == ""
     assert not friend.waiting
 
 
