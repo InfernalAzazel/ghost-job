@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -10,12 +11,12 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from job import models as models_pkg
-from job.boss.chat import ChatReplier, ChatResponder, Friend, job_from_boss_data
+from job.boss.chat import ChatDecision, ChatReplier, ChatResponder, Friend, job_from_boss_data
 from job.boss.filters import KeywordFilter
 from job.boss.jobs import Job
 from job.boss.review import Verdict
 from job.models import init_db, reset_engine
-from job.models.chat import ChatMessage, ChatMessageRow
+from job.models.chat import ChatMessage, ChatMessageRow, ChatRejectionRow
 from job.models.job import JobRow
 from job.models.setting import LlmSettings
 
@@ -54,19 +55,22 @@ def tmp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     reset_engine()
 
 
-def test_friend_waiting_only_when_hr_sent_unread():
+def test_friend_waiting_when_hr_sent_last():
     friend = Friend.model_validate(FRIEND)
-    assert friend.waiting and friend.label == "王女士 · 示例科技"
-    assert not Friend.model_validate({**FRIEND, "unreadMsgCount": 0}).waiting
-    mine = {**FRIEND, "lastMessageInfo": {"fromId": 2002}}
-    assert not Friend.model_validate(mine).waiting
+    assert friend.label == "王女士 · 示例科技" and friend.last_mid == "9"
+    assert friend.waiting
+    assert Friend.model_validate({**FRIEND, "unreadMsgCount": 0}).waiting
+
+    mine = {**FRIEND["lastMessageInfo"], "fromId": 2002}
+    assert not Friend.model_validate({**FRIEND, "lastMessageInfo": mine}).waiting
 
 
 def test_friend_tolerates_nulls():
     friend = Friend.model_validate(
         {**FRIEND, "unreadMsgCount": None, "lastMessageInfo": None, "brandName": None}
     )
-    assert friend.unread == 0 and friend.company == "" and not friend.waiting
+    assert friend.unread == 0 and friend.company == ""
+    assert not friend.waiting
 
 
 def test_job_from_boss_data():
@@ -121,11 +125,24 @@ def test_replier_prompt_and_single_line_output():
     assert prompt.index("我：您好") < prompt.index("HR：方便发简历吗")
 
     def answer(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[TextPart("可以的，\n我马上发送附件简历。")])
+        out = {"outcome": "continue", "reply": "可以的，\n我马上发送附件简历。"}
+        return ModelResponse(parts=[TextPart(json.dumps(out, ensure_ascii=False))])
 
     with replier.agent.override(model=FunctionModel(answer)):
-        text = asyncio.run(replier.reply(job, history, ""))
-    assert text == "可以的， 我马上发送附件简历。"
+        decision = asyncio.run(replier.reply(job, history, ""))
+    assert decision == ChatDecision(outcome="continue", reply="可以的， 我马上发送附件简历。")
+
+
+def test_rejection_mark_and_clear(tmp_db):
+    ChatMessageRow.record_new(
+        [ChatMessage(mid="1", from_hr=True, text="不合适")], job_uid="", boss_id="boss-1", hr_name="王女士"
+    )
+    ChatRejectionRow.mark("boss-1", by="hr", text="不合适")
+    assert ChatMessageRow.conversations()[0]["rejected"] == "HR 已拒绝"
+    ChatRejectionRow.mark("boss-1", by="me", text="感谢，暂不考虑")
+    assert ChatMessageRow.conversations()[0]["rejected"] == "已婉拒"
+    ChatRejectionRow.clear("boss-1")
+    assert ChatMessageRow.conversations()[0]["rejected"] == ""
 
 
 class FakeReviewer:
@@ -185,16 +202,65 @@ def test_known_job_keeps_previous_verdict(tmp_db):
     assert logs == []
 
 
-class FakeResponse:
-    def __init__(self, url: str, payload: dict) -> None:
-        self.status, self.url, self._payload = 200, url, payload
+def _sending_responder() -> tuple[ChatResponder, list[tuple[str, str]], list[str]]:
+    responder, logs = _responder()
+    sent: list[str] = []
 
-    async def json(self) -> dict:
-        return self._payload
+    async def send(_page, text: str) -> bool:
+        sent.append(text)
+        return True
+
+    async def read(_page) -> list[ChatMessage]:
+        return [ChatMessage(mid=f"me-{i}", from_hr=False, text=t) for i, t in enumerate(sent)]
+
+    responder._send = send  # type: ignore[method-assign]
+    responder._read_messages = read  # type: ignore[method-assign]
+    return responder, logs, sent
 
 
-def test_friend_list_listener_collects_friends():
-    responder, _ = _responder()
-    payload = {"zpData": {"result": [FRIEND, {**FRIEND, "encryptBossId": ""}, {"uid": []}]}}
-    asyncio.run(responder._on_friend_list(FakeResponse("https://x/getGeekFriendList.json", payload)))
-    assert list(responder._friends) == ["boss-1"]
+def test_hr_rejection_is_marked_without_reply(tmp_db):
+    responder, logs, sent = _sending_responder()
+    friend = Friend.model_validate(FRIEND)
+    decision = ChatDecision(outcome="hr_rejected")
+    asyncio.run(responder._apply(None, friend, "job-1", decision, "暂时不符合我们的需求"))
+    assert sent == []
+    assert ChatRejectionRow.labels() == {"boss-1": "HR 已拒绝"}
+    assert logs[-1][0] == "skip" and "HR 已拒绝" in logs[-1][1]
+
+
+def test_decline_is_sent_then_marked(tmp_db):
+    responder, logs, sent = _sending_responder()
+    friend = Friend.model_validate(FRIEND)
+    decision = ChatDecision(outcome="declined", reply="感谢，这个岗位暂不考虑")
+    asyncio.run(responder._apply(None, friend, "job-1", decision, "考虑吗"))
+    assert sent == ["感谢，这个岗位暂不考虑"]
+    assert ChatRejectionRow.labels() == {"boss-1": "已婉拒"}
+    assert logs[-1][0] == "reply"
+
+
+def test_continue_reply_clears_mark(tmp_db):
+    ChatRejectionRow.mark("boss-1", by="me", text="暂不考虑")
+    responder, _logs, sent = _sending_responder()
+    friend = Friend.model_validate(FRIEND)
+    decision = ChatDecision(outcome="continue", reply="好的，这个岗位可以聊聊")
+    asyncio.run(responder._apply(None, friend, "job-1", decision, "换个岗位看看？"))
+    assert sent == ["好的，这个岗位可以聊聊"]
+    assert ChatRejectionRow.labels() == {}
+
+
+def test_unanswered_is_hr_messages_after_my_last():
+    msgs = [
+        ChatMessage(mid="1", from_hr=True, text="你好"),
+        ChatMessage(mid="2", from_hr=False, text="您好"),
+        ChatMessage(mid="3", from_hr=True, text="要有证书"),
+        ChatMessage(mid="4", from_hr=True, text=""),
+        ChatMessage(mid="5", from_hr=True, text="有吗"),
+    ]
+    assert [m.mid for m in ChatResponder.unanswered(msgs)] == ["3", "5"]
+    assert ChatResponder.unanswered(msgs[:2]) == []
+
+
+def test_parse_friends_skips_invalid():
+    friends = ChatResponder.parse_friends([FRIEND, {**FRIEND, "encryptBossId": ""}, {"uid": []}])
+    assert [f.boss_id for f in friends] == ["boss-1"]
+    assert ChatResponder.parse_friends(None) == []

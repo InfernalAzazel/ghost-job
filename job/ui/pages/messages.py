@@ -15,6 +15,8 @@ class MessagesPage:
 
     LIST_WIDTH = "300px"
     SALARY = "#F26D5F"
+    # 同一行里不被挤压换行的短文本
+    NO_SHRINK = {"white_space": "nowrap", "flex_shrink": "0"}
 
     @classmethod
     def create(cls) -> rx.Component:
@@ -118,7 +120,14 @@ class MessagesPage:
             cls._avatar(item["hr_name"], "40px"),
             rx.vstack(
                 rx.hstack(
-                    rx.text(item["hr_name"], font_weight="600", color=TEXT, font_size="0.9em"),
+                    rx.text(
+                        item["hr_name"],
+                        font_weight="600",
+                        color=TEXT,
+                        font_size="0.9em",
+                        white_space="nowrap",
+                        flex_shrink="0",
+                    ),
                     rx.text(
                         item["company"],
                         font_size="0.78em",
@@ -126,9 +135,27 @@ class MessagesPage:
                         overflow="hidden",
                         text_overflow="ellipsis",
                         white_space="nowrap",
+                        min_width="0",
                     ),
                     rx.spacer(),
-                    rx.text(item["last_time"], font_size="0.75em", color=MUTED, white_space="nowrap"),
+                    rx.cond(
+                        item["rejected"] != "",
+                        rx.badge(
+                            item["rejected"],
+                            color_scheme="gray",
+                            variant="soft",
+                            size="1",
+                            flex_shrink="0",
+                        ),
+                    ),
+                    rx.text(
+                        item["last_time"],
+                        font_size="0.75em",
+                        color=MUTED,
+                        white_space="nowrap",
+                        flex_shrink="0",
+                        font_variant_numeric="tabular-nums",
+                    ),
                     width="100%",
                     align="center",
                     spacing="2",
@@ -224,10 +251,25 @@ class MessagesPage:
             rx.cond(
                 chat["title"] != "",
                 rx.hstack(
-                    rx.text("沟通职位", font_size="0.8em", color=MUTED),
-                    rx.text(chat["title"], font_size="0.85em", font_weight="600", color=TEXT),
-                    rx.text(chat["salary"], font_size="0.85em", font_weight="600", color=cls.SALARY),
-                    rx.text(chat["location"], font_size="0.8em", color=MUTED),
+                    rx.text("沟通职位", font_size="0.8em", color=MUTED, **cls.NO_SHRINK),
+                    rx.text(
+                        chat["title"],
+                        font_size="0.85em",
+                        font_weight="600",
+                        color=TEXT,
+                        overflow="hidden",
+                        text_overflow="ellipsis",
+                        white_space="nowrap",
+                        min_width="0",
+                    ),
+                    rx.text(
+                        chat["salary"],
+                        font_size="0.85em",
+                        font_weight="600",
+                        color=cls.SALARY,
+                        **cls.NO_SHRINK,
+                    ),
+                    rx.text(chat["location"], font_size="0.8em", color=MUTED, **cls.NO_SHRINK),
                     rx.spacer(),
                     rx.link(
                         rx.hstack(
@@ -239,6 +281,7 @@ class MessagesPage:
                         href=chat["link"],
                         is_external=True,
                         color=ACCENT,
+                        **cls.NO_SHRINK,
                     ),
                     width="100%",
                     align="center",

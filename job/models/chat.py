@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel
 from sqlmodel import Field, SQLModel, col, select
@@ -22,6 +22,44 @@ class ChatMessage(BaseModel):
     # 是否 HR 发来的（否则是我发的）
     from_hr: bool
     text: str = ""
+
+
+class ChatRejectionRow(SQLModel, table=True):
+    """已结束的会话：HR 说了不合适，或我方已婉拒；HR 再发新消息时由 AI 重新判断。"""
+
+    __tablename__ = "chat_rejection"
+
+    LABELS: ClassVar[dict[str, str]] = {"hr": "HR 已拒绝", "me": "已婉拒"}
+
+    boss_id: str = Field(primary_key=True, description="HR 的加密 ID")
+    by: str = Field(description="谁拒绝的：hr / me")
+    text: str = Field(default="", description="拒绝的那句话")
+    created_at: datetime = Field(default_factory=_now, description="标记时间（UTC）")
+
+    @classmethod
+    def mark(cls, boss_id: str, *, by: str, text: str) -> None:
+        from job.models import db_session
+
+        with db_session() as session:
+            session.merge(cls(boss_id=boss_id, by=by, text=text))
+            session.commit()
+
+    @classmethod
+    def clear(cls, boss_id: str) -> None:
+        from job.models import db_session
+
+        with db_session() as session:
+            if row := session.get(cls, boss_id):
+                session.delete(row)
+                session.commit()
+
+    @classmethod
+    def labels(cls) -> dict[str, str]:
+        """HR → 标记文案（「HR 已拒绝」/「已婉拒」）。"""
+        from job.models import db_session
+
+        with db_session() as session:
+            return {r.boss_id: cls.LABELS.get(r.by, "") for r in session.exec(select(cls)).all()}
 
 
 class ChatMessageRow(SQLModel, table=True):
@@ -102,6 +140,7 @@ class ChatMessageRow(SQLModel, table=True):
                     select(JobRow).where(col(JobRow.uid).in_(set(job_uids.values())))
                 ).all()
             }
+        rejected = ChatRejectionRow.labels()
         today = datetime.now().astimezone().date()
         items = []
         for boss_id, last in sorted(latest.items(), key=lambda kv: kv[1].created_at, reverse=True):
@@ -119,6 +158,7 @@ class ChatMessageRow(SQLModel, table=True):
                 "last_text": last.text,
                 "last_from_hr": last.from_hr,
                 "last_time": when.strftime("%H:%M" if when.date() == today else "%m-%d"),
+                "rejected": rejected.get(boss_id, ""),
             }
             q = search.strip()
             if q and not any(q in item[k] for k in ("hr_name", "company", "title")):
