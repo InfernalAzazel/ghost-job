@@ -214,6 +214,8 @@ class ChatResponder:
     DESCRIPTION = ".job-sec-text"
     # 两次刷新会话列表之间的等待（秒）
     POLL: ClassVar[tuple[float, float]] = (60, 120)
+    # 打开聊天页遇到网络异常时的重试间隔（秒）
+    RETRY = 60
     # 打字时每个字的间隔（毫秒）
     TYPING: ClassVar[tuple[float, float]] = (80, 220)
     # 读取当前会话消息：[{mid, from_hr, text}]，系统提示等既不是 HR 也不是我的跳过
@@ -269,7 +271,7 @@ class ChatResponder:
         page = await context.new_page()
         try:
             log("打开聊天页", "chat")
-            if not await self._open_page(page):
+            if not await self._reopen(page):
                 return "need_login"
             low, high = self.POLL
             await self._log(
@@ -284,7 +286,7 @@ class ChatResponder:
                     continue
                 friends = await self._recent_friends(page)
                 if friends is None:
-                    if not await self._open_page(page):
+                    if not await self._reopen(page):
                         return "need_login"
                     continue
                 pending = [
@@ -304,9 +306,22 @@ class ChatResponder:
             with contextlib.suppress(PlaywrightError):
                 await page.close()
 
-    async def _open_page(self, page: Page) -> bool:
-        """打开聊天页并等会话列表出现；需要登录时返回 False。"""
-        await page.goto(self.CHAT_URL, wait_until="domcontentloaded")
+    async def _reopen(self, page: Page) -> bool:
+        """打开聊天页，网络异常时每隔一段时间重试，直到恢复或请求停止；需要登录时返回 False。"""
+        while (opened := await self._open_page(page)) is None:
+            await self._log(f"网络异常，打开聊天页失败，{self.RETRY} 秒后重试", "warn")
+            await self._sleep(self.RETRY)
+            if self._stop.is_set():
+                return True
+        return opened
+
+    async def _open_page(self, page: Page) -> bool | None:
+        """打开聊天页并等会话列表出现；需要登录时返回 False，网络异常返回 None。"""
+        try:
+            await page.goto(self.CHAT_URL, wait_until="domcontentloaded")
+        except PlaywrightError as exc:
+            log(f"打开聊天页失败：{exc!r}", "chat")
+            return None
         try:
             await page.wait_for_selector(self.ITEM, timeout=20_000)
         except PlaywrightTimeoutError:

@@ -292,6 +292,38 @@ def test_unanswered_is_hr_messages_after_my_last():
     assert ChatResponder.unanswered(msgs[:2]) == []
 
 
+def test_reopen_retries_until_network_recovers():
+    responder, logs = _responder()
+    results = iter([None, None, True])
+    waits: list[float] = []
+
+    async def open_page(_page) -> bool | None:
+        return next(results)
+
+    async def sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    responder._open_page = open_page  # type: ignore[method-assign]
+    responder._sleep = sleep  # type: ignore[method-assign]
+    assert asyncio.run(responder._reopen(None))
+    assert waits == [ChatResponder.RETRY] * 2
+    assert [level for level, _text in logs] == ["warn", "warn"]
+
+
+def test_reopen_stops_waiting_when_stopped():
+    responder, _logs = _responder()
+
+    async def open_page(_page) -> bool | None:
+        return None
+
+    async def sleep(_seconds: float) -> None:
+        responder.request_stop()
+
+    responder._open_page = open_page  # type: ignore[method-assign]
+    responder._sleep = sleep  # type: ignore[method-assign]
+    assert asyncio.run(responder._reopen(None))
+
+
 def test_parse_friends_skips_invalid():
     friends = ChatResponder.parse_friends([FRIEND, {**FRIEND, "encryptBossId": ""}, {"uid": []}])
     assert [f.boss_id for f in friends] == ["boss-1"]
