@@ -30,30 +30,32 @@ def _export_name() -> str:
 
 
 class JobsState(rx.State):
-    rows: list[dict] = rx.field(default_factory=list)
+    rows: rx.Field[list[dict]] = rx.field(default_factory=list)
     total: int = 0
     search: str = ""
     analysis: str = JobRow.ANALYSIS_FILTERS[0]
-    analysis_options: list[str] = rx.field(
+    analysis_options: rx.Field[list[str]] = rx.field(
         default_factory=lambda: list(JobRow.ANALYSIS_FILTERS)
     )
     suitable: str = JobRow.SUITABLE_FILTERS[1]
-    suitable_options: list[str] = rx.field(
+    suitable_options: rx.Field[list[str]] = rx.field(
         default_factory=lambda: list(JobRow.SUITABLE_FILTERS)
     )
+    # 从消息页「查看岗位」跳转过来时只看这个岗位（搜索框填岗位名，同名岗位也不混进来）；改搜索后失效
+    focus_uid: str = ""
     page: int = 1
     page_size: int = 15
-    selected: list[str] = rx.field(default_factory=list)
+    selected: rx.Field[list[str]] = rx.field(default_factory=list)
     detail_open: bool = False
-    detail: dict = rx.field(default_factory=dict)
+    detail: rx.Field[dict] = rx.field(default_factory=dict)
     # 待确认删除的岗位：{uid, title}；空表示确认框关闭
-    pending_delete: dict[str, str] = rx.field(default_factory=dict)
+    pending_delete: rx.Field[dict[str, str]] = rx.field(default_factory=dict)
     batch_delete_open: bool = False
     analyzing: bool = False
     # AI 分析进度：已完成数
     analyzed: int = 0
     # 点导出时勾选的岗位；空表示导出全部
-    _export_uids: list[str] = rx.field(default_factory=list)
+    _export_uids: rx.Field[list[str]] = rx.field(default_factory=list)
 
     @rx.var
     def selected_count(self) -> int:
@@ -83,19 +85,17 @@ class JobsState(rx.State):
         return self.page < self.total_pages
 
     def _reload(self) -> None:
-        self.total = JobRow.count(
-            search=self.search, analysis=self.analysis, suitable=self.suitable
-        )
+        filters = {
+            "search": self.search,
+            "analysis": self.analysis,
+            "suitable": self.suitable,
+            "uid": self.focus_uid,
+        }
+        self.total = JobRow.count(**filters)
         max_page = max(1, math.ceil(self.total / self.page_size)) if self.page_size else 1
         self.page = min(self.page, max_page)
         offset = (self.page - 1) * self.page_size
-        self.rows = JobRow.list_dicts(
-            search=self.search,
-            analysis=self.analysis,
-            suitable=self.suitable,
-            limit=self.page_size,
-            offset=offset,
-        )
+        self.rows = JobRow.list_dicts(**filters, limit=self.page_size, offset=offset)
         # Drop selections that are no longer on this page
         visible = {str(r.get("uid") or "") for r in self.rows}
         self.selected = [u for u in self.selected if u in visible]
@@ -105,11 +105,22 @@ class JobsState(rx.State):
         init_db()
         self.page = 1
         self.selected = []
+        if self.focus_uid:
+            # 上次是从消息页定位过来的，搜索框里的岗位名不是用户自己输入的
+            self.search = ""
+            self.focus_uid = ""
+        uid = self.router.url.query_parameters.get("job", "")
+        if uid and (row := JobRow.get_dict(uid)):
+            self.focus_uid = uid
+            self.search = row["title"]
+            self.analysis = JobRow.ANALYSIS_FILTERS[0]
+            self.suitable = JobRow.SUITABLE_FILTERS[0]
         self._reload()
 
     @rx.event
     def set_search_and_reload(self, value: str):
         self.search = value
+        self.focus_uid = ""
         self.page = 1
         self._reload()
 
@@ -194,11 +205,8 @@ class JobsState(rx.State):
             row = JobRow.get_dict(uid)
             if row is None:
                 return False
-            job = Job(
-                title=row["title"],
-                company=row["company"],
-                salary=row["salary"],
-                description=row["description"],
+            job = Job.model_validate(
+                {k: row[k] for k in ("title", "company", "salary", "description")}
             )
             try:
                 async with limit:

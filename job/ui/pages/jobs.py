@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import reflex as rx
+from reflex.vars import ObjectVar
 
 from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
@@ -79,6 +80,18 @@ class JobsPage:
                             "box_shadow": "none",
                             "outline": "none",
                         },
+                    ),
+                    rx.icon_button(
+                        rx.icon("x", size=14),
+                        on_click=JobsState.set_search_and_reload(""),
+                        variant="ghost",
+                        color_scheme="gray",
+                        size="1",
+                        radius="full",
+                        cursor="pointer",
+                        title="清空搜索",
+                        # 占住位置，出现/消失时输入框不跳动
+                        visibility=rx.cond(JobsState.search != "", "visible", "hidden"),
                     ),
                     spacing="2",
                     align="center",
@@ -234,7 +247,7 @@ class JobsPage:
         )
 
     @staticmethod
-    def _data_row(job: rx.Var, _index: rx.Var) -> rx.Component:
+    def _data_row(job: ObjectVar[dict], _index: rx.Var) -> rx.Component:
         return rx.hstack(
             rx.checkbox(
                 checked=JobsState.selected.contains(job["uid"]),

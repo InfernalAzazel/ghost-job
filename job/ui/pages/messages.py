@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any, ClassVar
+
 import reflex as rx
+from reflex.vars import ObjectVar
 
 from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
@@ -16,7 +19,7 @@ class MessagesPage:
     LIST_WIDTH = "300px"
     SALARY = "#F26D5F"
     # 同一行里不被挤压换行的短文本
-    NO_SHRINK = {"white_space": "nowrap", "flex_shrink": "0"}
+    NO_SHRINK: ClassVar[dict[str, Any]] = {"white_space": "nowrap", "flex_shrink": "0"}
 
     @classmethod
     def create(cls) -> rx.Component:
@@ -114,7 +117,7 @@ class MessagesPage:
         )
 
     @classmethod
-    def _conversation(cls, item: rx.Var) -> rx.Component:
+    def _conversation(cls, item: ObjectVar[dict]) -> rx.Component:
         is_active = item["boss_id"] == MessagesState.active_id
         return rx.hstack(
             cls._avatar(item["hr_name"], "40px"),
@@ -271,17 +274,20 @@ class MessagesPage:
                     ),
                     rx.text(chat["location"], font_size="0.8em", color=MUTED, **cls.NO_SHRINK),
                     rx.spacer(),
-                    rx.link(
-                        rx.hstack(
-                            rx.text("查看岗位", font_size="0.8em"),
-                            rx.icon("external-link", size=13),
-                            spacing="1",
-                            align="center",
+                    rx.cond(
+                        chat["job_uid"] != "",
+                        rx.link(
+                            rx.hstack(
+                                rx.text("查看岗位", font_size="0.8em"),
+                                rx.icon("arrow-right", size=13),
+                                spacing="1",
+                                align="center",
+                            ),
+                            on_click=MessagesState.open_job,
+                            cursor="pointer",
+                            color=ACCENT,
+                            **cls.NO_SHRINK,
                         ),
-                        href=chat["link"],
-                        is_external=True,
-                        color=ACCENT,
-                        **cls.NO_SHRINK,
                     ),
                     width="100%",
                     align="center",
@@ -295,7 +301,7 @@ class MessagesPage:
         )
 
     @classmethod
-    def _bubble(cls, message: rx.Var) -> rx.Component:
+    def _bubble(cls, message: ObjectVar[dict]) -> rx.Component:
         mine = ~message["from_hr"].to(bool)
         body = rx.vstack(
             rx.box(

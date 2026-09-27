@@ -175,8 +175,10 @@ class JobRow(SQLModel, table=True):
             return session.exec(stmt.limit(1)).first()
 
     @classmethod
-    def _apply_filters(cls, stmt, search: str, analysis: str, suitable: str):
-        """按岗位名 / 公司模糊搜，并按分析状态、是否合适筛选。"""
+    def _apply_filters(cls, stmt, search: str, analysis: str, suitable: str, uid: str = ""):
+        """按岗位名 / 公司模糊搜，并按分析状态、是否合适筛选；给了 ``uid`` 只看这一个岗位。"""
+        if uid:
+            stmt = stmt.where(col(cls.uid) == uid)
         if q := search.strip():
             like = f"%{q}%"
             stmt = stmt.where(
@@ -197,15 +199,17 @@ class JobRow(SQLModel, table=True):
         return stmt
 
     @classmethod
-    def count(cls, *, search: str = "", analysis: str = "", suitable: str = "") -> int:
-        """统计岗位数；可按关键字、分析状态与是否合适筛选。"""
+    def count(
+        cls, *, search: str = "", analysis: str = "", suitable: str = "", uid: str = ""
+    ) -> int:
+        """统计岗位数；可按关键字、分析状态、是否合适与主键筛选。"""
         from sqlalchemy import func
 
         from job.models import db_session
 
         with db_session() as session:
             stmt = select(func.count()).select_from(cls)
-            stmt = cls._apply_filters(stmt, search, analysis, suitable)
+            stmt = cls._apply_filters(stmt, search, analysis, suitable, uid)
             return int(session.exec(stmt).one())
 
     @classmethod
@@ -226,6 +230,7 @@ class JobRow(SQLModel, table=True):
         search: str = "",
         analysis: str = "",
         suitable: str = "",
+        uid: str = "",
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -234,7 +239,7 @@ class JobRow(SQLModel, table=True):
 
         with db_session() as session:
             stmt = select(cls).order_by(col(cls.created_at).desc())
-            stmt = cls._apply_filters(stmt, search, analysis, suitable)
+            stmt = cls._apply_filters(stmt, search, analysis, suitable, uid)
             rows = session.exec(stmt.offset(offset).limit(limit)).all()
         return [r.to_dict() for r in rows]
 

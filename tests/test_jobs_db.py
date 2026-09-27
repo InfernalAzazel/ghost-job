@@ -58,6 +58,14 @@ def test_result_and_reason(tmp_db):
     assert [r["uid"] for r in JobRow.list_dicts(suitable=no)] == ["b"]
 
 
+def test_filter_by_uid(tmp_db):
+    JobRow.record(_job("a"))
+    JobRow.record(_job("b"))
+    assert JobRow.count(uid="b") == 1
+    assert [r["uid"] for r in JobRow.list_dicts(uid="b")] == ["b"]
+    assert JobRow.count(uid="missing") == 0
+
+
 def test_count_today_only_counts_applied(tmp_db):
     JobRow.record(_job("new"), applied=True)
     JobRow.record(_job("old"), applied=True)

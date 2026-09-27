@@ -148,6 +148,7 @@ class ChatMessageRow(SQLModel, table=True):
             when = last.local_time
             item = {
                 "boss_id": boss_id,
+                "job_uid": job.uid if job else "",
                 "hr_name": last.hr_name,
                 "hr_title": job.hr_title if job else "",
                 "company": job.company if job else "",

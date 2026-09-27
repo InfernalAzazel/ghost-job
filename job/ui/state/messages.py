@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 import reflex as rx
 
 from job.models import init_db
@@ -9,11 +11,11 @@ from job.models.chat import ChatMessageRow
 
 
 class MessagesState(rx.State):
-    conversations: list[dict] = rx.field(default_factory=list)
+    conversations: rx.Field[list[dict]] = rx.field(default_factory=list)
     search: str = ""
     # 当前打开的会话（HR 的加密 ID）
     active_id: str = ""
-    messages: list[dict] = rx.field(default_factory=list)
+    messages: rx.Field[list[dict]] = rx.field(default_factory=list)
 
     @rx.var
     def active(self) -> dict:
@@ -44,3 +46,9 @@ class MessagesState(rx.State):
     def open_chat(self, boss_id: str) -> None:
         self.active_id = boss_id
         self.messages = ChatMessageRow.list_for_boss(boss_id)
+
+    @rx.event
+    def open_job(self):
+        """跳到岗位管理，只显示当前会话沟通的岗位。"""
+        if uid := self.active.get("job_uid"):
+            return rx.redirect(f"/jobs?{urlencode({'job': uid})}")
