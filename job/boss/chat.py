@@ -26,7 +26,7 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 
 from job.boss.filters import BASE_URL, KeywordFilter, ReplyPaceProfile
 from job.boss.jobs import Job, LogSink, read_description
-from job.models.chat import ChatMessage, ChatMessageRow, ChatRejectionRow
+from job.models.chat import ChatInterviewRow, ChatMessage, ChatMessageRow, ChatRejectionRow
 from job.models.job import JobRow
 from job.models.setting import LlmSettings
 from job.utils import as_dict, log
@@ -119,6 +119,13 @@ class ChatDecision(BaseModel):
     send_resume: bool = Field(
         default=False,
         description="HR 在索要简历时为 true，回复发出后会自动发送附件简历",
+    )
+    interview: bool = Field(
+        default=False,
+        description=(
+            "HR 发出面试邀请，或双方正在约面试时间、地点、方式时为 true；"
+            "只是介绍面试流程（如「我们是线下面试」）或我方婉拒时为 false"
+        ),
     )
 
     @field_validator("reply")
@@ -425,7 +432,9 @@ class ChatResponder:
     async def _apply(
         self, page: Page, friend: Friend, uid: str, decision: ChatDecision, hr_text: str
     ) -> None:
-        """按 AI 的判断处理：HR 已拒绝就只标记；否则发出回复，婉拒时标记、继续沟通时取消标记。"""
+        """按 AI 的判断处理：识别到面试邀请先打标签；HR 已拒绝就只标记；否则发出回复，婉拒时标记、继续沟通时取消标记。"""
+        if decision.interview and ChatInterviewRow.mark_invited_auto(friend.boss_id):
+            await self._log(f"{friend.label}（识别到面试邀请，已标记有面试）")
         if decision.outcome == "hr_rejected":
             ChatRejectionRow.mark(friend.boss_id, by="hr", text=hr_text)
             await self._log(f"{friend.label}（HR 已拒绝，不再回复）", "skip")

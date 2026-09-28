@@ -145,12 +145,12 @@ def test_replier_prompt_and_single_line_output():
     assert prompt.index("我：您好") < prompt.index("HR：方便发简历吗")
 
     def answer(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
-        out = {"outcome": "continue", "reply": "可以的，\n我马上发送附件简历。"}
+        out = {"outcome": "continue", "reply": "可以的，\n我马上发送附件简历。", "interview": True}
         return ModelResponse(parts=[TextPart(json.dumps(out, ensure_ascii=False))])
 
     with replier.agent.override(model=FunctionModel(answer)):
         decision = asyncio.run(replier.reply(job, history, ""))
-    assert decision == ChatDecision(outcome="continue", reply="可以的， 我马上发送附件简历。")
+    assert decision == ChatDecision(outcome="continue", reply="可以的， 我马上发送附件简历。", interview=True)
 
 
 def test_rejection_mark_and_clear(tmp_db):
@@ -349,6 +349,32 @@ def test_resume_failure_asks_for_manual_send(tmp_db):
     asyncio.run(responder._apply(None, friend, "job-1", decision, "发下简历"))
     assert sent == ["好的", "<简历>"]
     assert any(level == "warn" and "手动发送" in text for level, text in logs)
+
+
+def test_interview_invitation_is_marked(tmp_db):
+    responder, logs, _sent = _sending_responder()
+    friend = Friend.model_validate(FRIEND)
+    decision = ChatDecision(outcome="continue", reply="好的，周三下午可以", interview=True)
+    asyncio.run(responder._apply(None, friend, "job-1", decision, "周三下午来面试可以吗"))
+    assert ChatInterviewRow.labels() == {"boss-1": "invited"}
+    assert any(level == "info" and "已标记有面试" in text for level, text in logs)
+
+
+def test_interview_detection_keeps_manual_status(tmp_db):
+    ChatInterviewRow.mark("boss-1", "done")
+    responder, logs, _sent = _sending_responder()
+    friend = Friend.model_validate(FRIEND)
+    decision = ChatDecision(outcome="hr_rejected", interview=True)
+    asyncio.run(responder._apply(None, friend, "job-1", decision, "面试没通过，不好意思"))
+    assert ChatInterviewRow.labels() == {"boss-1": "done"}
+    assert not any("已标记有面试" in text for _level, text in logs)
+
+
+def test_no_interview_is_not_marked(tmp_db):
+    responder, _logs, _sent = _sending_responder()
+    friend = Friend.model_validate(FRIEND)
+    asyncio.run(responder._apply(None, friend, "job-1", ChatDecision(outcome="continue", reply="好的"), "你好"))
+    assert ChatInterviewRow.labels() == {}
 
 
 def test_resume_not_sent_by_default(tmp_db):
