@@ -92,11 +92,15 @@ jobs:
           # bundle_dmg.sh is flaky on hosted macOS runners; the DMG is built separately
           if sys.platform == "darwin":
               data.setdefault("bundle", {})["targets"] = ["app"]
-          # The exe loads python312.dll at startup, so it must sit next to the exe
+          # The exe loads python312.dll at startup, so it must sit next to the exe.
+          # Tauri keeps resources in a HashMap: a file matched by two entries (the "python"
+          # directory and a DLL mapping) lands in a random one per build, so the DLLs are
+          # mapped from a separate copy (see "Stage Windows DLLs") that nothing else matches.
           if sys.platform == "win32":
               resources = data["bundle"]["resources"]
+              resources.pop("python/python/python3*.dll", None)
               for dll in ("python312.dll", "python3.dll", "vcruntime140.dll", "vcruntime140_1.dll"):
-                  resources[f"python/python/{dll}"] = dll
+                  resources[f"win-dlls/{dll}"] = dll
           conf.write_text(json.dumps(data, indent=2) + "\n")
           EOF
           cargo tauri icon ../../assets/icon.png
@@ -106,6 +110,21 @@ jobs:
         with:
           workspaces: tauri/src-tauri -> target
           key: ${{ matrix.name }}
+
+      - name: Stage Windows DLLs
+        if: runner.os == 'Windows'
+        run: |
+          uv run python - <<'EOF'
+          import shutil
+          from pathlib import Path
+          from reflex_desktop import runtime
+          src_tauri = Path("tauri/src-tauri")
+          runtime.assemble(src_tauri, Path.cwd())
+          out = src_tauri / "win-dlls"
+          out.mkdir(exist_ok=True)
+          for dll in ("python312.dll", "python3.dll", "vcruntime140.dll", "vcruntime140_1.dll"):
+              shutil.copy2(src_tauri / "python" / "python" / dll, out / dll)
+          EOF
 
       - name: Build app bundle
         run: uv run reflex-desktop build --bundle --skip-export
@@ -135,6 +154,22 @@ jobs:
                -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
             -exec cp {} dist/ \;
           ls -la dist
+
+      - name: Verify Windows installers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist -Filter *-setup.exe | Select-Object -First 1
+          if (-not ((& 7z l $exe.FullName) -match '\spython312\.dll$')) {
+            throw "$($exe.Name): python312.dll is not next to ghost-job.exe"
+          }
+          $msi = Get-ChildItem dist -Filter *.msi | Select-Object -First 1
+          $target = Join-Path $PWD "msi-check"
+          Start-Process msiexec -Wait -ArgumentList "/a `"$($msi.FullName)`" /qn TARGETDIR=`"$target`""
+          $exePath = Get-ChildItem $target -Recurse -Filter ghost-job.exe | Select-Object -First 1
+          if (-not $exePath -or -not (Test-Path (Join-Path $exePath.DirectoryName "python312.dll"))) {
+            throw "$($msi.Name): python312.dll is not next to ghost-job.exe"
+          }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
