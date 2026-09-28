@@ -33,7 +33,7 @@ def _csv_cell(value: Any) -> Any:
 class JobRow(SQLModel, table=True):
     """看过的岗位：合适的投递，不合适的也记下原因，下次遇到直接跳过。"""
 
-    __tablename__ = "job"
+    __tablename__ = "job"  # pyright: ignore[reportAssignmentType]
 
     # 高匹配分数线
     HIGH_MATCH: ClassVar[int] = 80

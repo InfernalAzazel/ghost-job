@@ -70,7 +70,7 @@ def _list_field(label: str) -> Any:
 class SearchConfigRow(SQLModel, table=True):
     """求职配置：搜索条件、筛选、投递节奏与简历。"""
 
-    __tablename__ = "search_config"
+    __tablename__ = "search_config"  # pyright: ignore[reportAssignmentType]
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
     query: str = Field(default="", description="岗位关键词")

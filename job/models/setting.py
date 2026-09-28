@@ -16,7 +16,7 @@ from job.boss.filters import Defaults, ReplyPaceProfile
 class SettingRow(SQLModel, table=True):
     """全局键值配置（与求职配置无关的设置）。"""
 
-    __tablename__ = "app_setting"
+    __tablename__ = "app_setting"  # pyright: ignore[reportAssignmentType]
 
     key: str = Field(primary_key=True)
     value: str = ""
