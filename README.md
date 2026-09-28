@@ -8,7 +8,14 @@
 
 按你的求职方向自动筛选岗位，AI 对比简历判断匹配度，只把简历投给真正合适的公司。
 
+[![GitHub Stars](https://img.shields.io/github/stars/InfernalAzazel/ghost-job?style=flat&logo=github&label=Stars)](https://github.com/InfernalAzazel/ghost-job/stargazers)
+[![最新版本](https://img.shields.io/github/v/release/InfernalAzazel/ghost-job?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC)](https://github.com/InfernalAzazel/ghost-job/releases/latest)
+[![下载量](https://img.shields.io/github/downloads/InfernalAzazel/ghost-job/total?label=%E4%B8%8B%E8%BD%BD%E9%87%8F)](https://github.com/InfernalAzazel/ghost-job/releases)
+[![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-PolyForm%20Noncommercial-blue)](LICENSE)
+
 [下载安装](https://github.com/InfernalAzazel/ghost-job/releases) · [快速开始](#快速开始) · [常见问题](#常见问题) · [加入交流群](#加入交流群)
+
+如果 Ghost Job 帮你省下了投递时间，欢迎点击右上角的 ⭐ **Star** 支持一下，让更多求职者看到它
 
 </div>
 
@@ -314,6 +321,18 @@ uv run pytest -q            # 运行测试
    - 涉及界面的改动，请附上修改前后的截图
 
 错别字、文档链接失效这类很小的修改，可以直接提交 PR，不用先开 Issue。
+
+## Star 趋势
+
+每一个 Star 都是继续更新的动力。如果 Ghost Job 帮你拿到了面试，欢迎点个 ⭐ Star，或者推荐给身边正在找工作的朋友。
+
+<a href="https://star-history.com/#InfernalAzazel/ghost-job&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=infernalazazel/ghost-job&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=infernalazazel/ghost-job&type=Date" />
+    <img alt="Star 趋势" src="https://api.star-history.com/svg?repos=infernalazazel/ghost-job&type=Date" />
+  </picture>
+</a>
 
 ## 许可证
 
