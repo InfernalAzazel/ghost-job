@@ -16,7 +16,7 @@ from job.boss.filters import KeywordFilter
 from job.boss.jobs import Job
 from job.boss.review import Verdict
 from job.models import init_db, reset_engine
-from job.models.chat import ChatMessage, ChatMessageRow, ChatRejectionRow
+from job.models.chat import ChatInterviewRow, ChatMessage, ChatMessageRow, ChatRejectionRow
 from job.models.job import JobRow
 from job.models.setting import LlmSettings
 
@@ -163,6 +163,33 @@ def test_rejection_mark_and_clear(tmp_db):
     assert ChatMessageRow.conversations()[0]["rejected"] == "已婉拒"
     ChatRejectionRow.clear("boss-1")
     assert ChatMessageRow.conversations()[0]["rejected"] == ""
+
+
+def test_interview_mark_auto_and_clear(tmp_db):
+    assert ChatInterviewRow.mark_invited_auto("boss-1")
+    assert ChatInterviewRow.labels() == {"boss-1": "invited"}
+    ChatInterviewRow.mark("boss-1", "done")
+    assert not ChatInterviewRow.mark_invited_auto("boss-1")
+    assert ChatInterviewRow.labels() == {"boss-1": "done"}
+    ChatInterviewRow.clear("boss-1")
+    assert ChatInterviewRow.labels() == {}
+
+
+def test_conversations_show_and_filter_interview(tmp_db):
+    for boss_id, name in (("boss-1", "王女士"), ("boss-2", "李先生"), ("boss-3", "赵女士")):
+        ChatMessageRow.record_new(
+            [ChatMessage(mid=boss_id, from_hr=True, text="您好")], job_uid="", boss_id=boss_id, hr_name=name
+        )
+    ChatInterviewRow.mark("boss-1", "invited", source="auto")
+    ChatInterviewRow.mark("boss-2", "failed")
+
+    items = {i["boss_id"]: i for i in ChatMessageRow.conversations()}
+    assert (items["boss-1"]["interview"], items["boss-1"]["interview_label"]) == ("invited", "有面试")
+    assert items["boss-3"]["interview_label"] == ""
+    assert [i["boss_id"] for i in ChatMessageRow.conversations(interview="有面试")] == ["boss-1"]
+    assert {i["boss_id"] for i in ChatMessageRow.conversations(interview="所有面试")} == {"boss-1", "boss-2"}
+    assert len(ChatMessageRow.conversations(interview="全部")) == 3
+    assert ChatMessageRow.conversations("王", interview="面试不通过") == []
 
 
 class FakeReviewer:

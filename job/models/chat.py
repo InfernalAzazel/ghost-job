@@ -62,6 +62,69 @@ class ChatRejectionRow(SQLModel, table=True):
             return {r.boss_id: cls.LABELS.get(r.by, "") for r in session.exec(select(cls)).all()}
 
 
+class ChatInterviewRow(SQLModel, table=True):
+    """会话的面试标签：AI 识别到面试邀请时自动标「有面试」，其余由手动标记。"""
+
+    __tablename__ = "chat_interview"  # pyright: ignore[reportAssignmentType]
+
+    LABELS: ClassVar[dict[str, str]] = {"invited": "有面试", "done": "已面试", "failed": "面试不通过"}
+    # 会话列表筛选；「所有面试」是有任意面试标签
+    FILTERS: ClassVar[tuple[str, ...]] = ("全部", "所有面试", *LABELS.values())
+    # 手动标记的选项；「无」是清除
+    CHOICES: ClassVar[tuple[str, ...]] = ("无", *LABELS.values())
+
+    boss_id: str = Field(primary_key=True, description="HR 的加密 ID")
+    status: str = Field(description="invited 有面试 / done 已面试 / failed 面试不通过")
+    source: str = Field(default="manual", description="auto AI 标记 / manual 手动标记")
+    updated_at: datetime = Field(default_factory=_now, description="最后更新时间（UTC）")
+
+    @classmethod
+    def mark(cls, boss_id: str, status: str, *, source: str = "manual") -> None:
+        from job.models import db_session
+
+        with db_session() as session:
+            session.merge(cls(boss_id=boss_id, status=status, source=source))
+            session.commit()
+
+    @classmethod
+    def mark_invited_auto(cls, boss_id: str) -> bool:
+        """还没有任何面试标签时标为「有面试」（AI 标记）；已有标签不动，返回 False。"""
+        from job.models import db_session
+
+        with db_session() as session:
+            if session.get(cls, boss_id) is not None:
+                return False
+            session.add(cls(boss_id=boss_id, status="invited", source="auto"))
+            session.commit()
+            return True
+
+    @classmethod
+    def clear(cls, boss_id: str) -> None:
+        from job.models import db_session
+
+        with db_session() as session:
+            if row := session.get(cls, boss_id):
+                session.delete(row)
+                session.commit()
+
+    @classmethod
+    def labels(cls) -> dict[str, str]:
+        """HR → 状态值（invited / done / failed）。"""
+        from job.models import db_session
+
+        with db_session() as session:
+            return {r.boss_id: r.status for r in session.exec(select(cls)).all()}
+
+    @classmethod
+    def matches(cls, status: str, wanted: str) -> bool:
+        """状态值 ``status`` 是否符合筛选文案 ``wanted``（空串或「全部」不筛选）。"""
+        if wanted in ("", "全部"):
+            return True
+        if wanted == "所有面试":
+            return bool(status)
+        return cls.LABELS.get(status) == wanted
+
+
 class ChatMessageRow(SQLModel, table=True):
     """与 HR 的一条聊天消息。"""
 
@@ -139,10 +202,11 @@ class ChatMessageRow(SQLModel, table=True):
         return self.created_at.replace(tzinfo=self.created_at.tzinfo or UTC).astimezone()
 
     @classmethod
-    def conversations(cls, search: str = "") -> list[dict[str, Any]]:
-        """会话列表：每个 HR 一条，带关联岗位与最后一条消息，最近的在前。
+    def conversations(cls, search: str = "", interview: str = "") -> list[dict[str, Any]]:
+        """会话列表：每个 HR 一条，带关联岗位、最后一条消息与标签，最近的在前。
 
-        ``search`` 模糊匹配 HR、公司或岗位名。
+        ``search`` 模糊匹配 HR、公司或岗位名；``interview`` 按面试标签筛选，
+        取 ``ChatInterviewRow.FILTERS`` 里的文案。
         """
         from job.models import db_session
         from job.models.job import JobRow
@@ -163,9 +227,13 @@ class ChatMessageRow(SQLModel, table=True):
                 ).all()
             }
         rejected = ChatRejectionRow.labels()
+        interviews = ChatInterviewRow.labels()
         today = datetime.now().astimezone().date()
         items = []
         for boss_id, last in sorted(latest.items(), key=lambda kv: kv[1].created_at, reverse=True):
+            status = interviews.get(boss_id, "")
+            if not ChatInterviewRow.matches(status, interview):
+                continue
             job = jobs.get(job_uids.get(boss_id, ""))
             when = last.local_time
             item = {
@@ -182,6 +250,8 @@ class ChatMessageRow(SQLModel, table=True):
                 "last_from_hr": last.from_hr,
                 "last_time": when.strftime("%H:%M" if when.date() == today else "%m-%d"),
                 "rejected": rejected.get(boss_id, ""),
+                "interview": status,
+                "interview_label": ChatInterviewRow.LABELS.get(status, ""),
             }
             q = search.strip()
             if q and not any(q in item[k] for k in ("hr_name", "company", "title")):
