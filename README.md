@@ -231,13 +231,30 @@ v0.2.0 调整了本地数据结构。升级前请先退出 Ghost Job，删除用
 **每天能投多少个？**
 BOSS 直聘每天约 150 次沟通上限，Ghost Job 会在达到上限时自动停止。
 
-**打开后右下角提示「Cannot connect to server」怎么办？**
-这是正常现象，不用重装。Ghost Job 每次启动都要在后台加载 AI 和数据服务，加载完成前界面连不上，就会出现这个提示。一般等 1～3 分钟会自动消失，电脑配置越好越快。提示消失后就可以正常使用。
+**打开后显示「Ghost Job 正在启动，请稍候…」怎么办？**
+这是正常现象，不用重装。Ghost Job 每次启动都要在后台加载 AI 和数据服务，加载完成前会先显示这个启动页，加载完后自动进入工作台，一般几秒到 1 分钟，电脑配置越好越快。旧版本在这时会在右下角提示「Cannot connect to server」，同样等一会儿就会消失。如果等了 3 分钟以上还没进入，请关闭程序重新打开；仍然不行的话，请带上日志提 Issue。
 
 ![启动中](assets/screenshots/backend-connecting.png)
 
 **支持哪些系统？**
 已在 Windows 10 / 11 和 macOS 上测试可正常使用。不支持 Windows 7。Linux 提供了安装包，但尚未完整测试，遇到问题欢迎反馈。
+
+**Windows 打开时提示缺少 `python312.dll` 怎么办？**
+这是电脑里的 Python 环境冲突导致的，不是安装包损坏。常见情况是之前用 Python 官网安装包装过其他版本的 Python（例如 3.13），系统环境变量里的 Python 路径干扰了 Ghost Job 自带的运行环境。如果你平时需要使用 Python，建议改用 [uv](https://docs.astral.sh/uv/) 管理 Python，让各个 Python 版本互相隔离：
+
+1. 在「设置 → 应用」里卸载用官网安装包装的 Python，并检查「系统属性 → 环境变量」，删除 `Path` 里残留的 Python 路径，以及 `PYTHONHOME`、`PYTHONPATH` 变量（如果有）
+2. 打开 PowerShell，安装 uv：
+
+   ```powershell
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+
+   国内网络下载慢的话，也可以到 [GitHub Releases](https://github.com/astral-sh/uv/releases) 下载 `uv-x86_64-pc-windows-msvc.zip`，解压后把 `uv.exe` 所在目录加入 `Path`
+3. 关闭并重新打开 PowerShell，运行 `uv --version`，能看到版本号就说明安装成功
+4. 以后需要 Python 时用 uv 安装，例如 `uv python install 3.13`，它不会修改系统环境变量，也就不会再影响 Ghost Job
+5. 重新打开 Ghost Job 即可正常使用
+
+更多安装方式见 [uv 官方安装文档](https://docs.astral.sh/uv/getting-started/installation/)。
 
 **macOS 提示「无法验证开发者」怎么办？**
 在应用上右键选择「打开」，或前往「系统设置 → 隐私与安全性」点击「仍要打开」。
