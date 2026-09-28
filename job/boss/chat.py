@@ -123,8 +123,9 @@ class ChatDecision(BaseModel):
     interview: bool = Field(
         default=False,
         description=(
-            "HR 发出面试邀请，或双方正在约面试时间、地点、方式时为 true；"
-            "只是介绍面试流程（如「我们是线下面试」）或我方婉拒时为 false"
+            "只看 HR 说了什么：HR 主动邀请面试，或 HR 在和我确认面试时间、地点、方式时为 true；"
+            "HR 还没邀请、只是我方在回复里提出或询问面试（如「方便先线上面试吗」），"
+            "HR 只是介绍面试流程（如「我们是线下面试」），或我方婉拒时都为 false"
         ),
     )
 
