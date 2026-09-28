@@ -16,7 +16,7 @@ from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
 class MessagesPage:
     """与 HR 的聊天记录，布局参照 BOSS 直聘消息页。"""
 
-    LIST_WIDTH = "300px"
+    LIST_WIDTH = "330px"
     SALARY = "#F26D5F"
     # 同一行里不被挤压换行的短文本
     NO_SHRINK: ClassVar[dict[str, Any]] = {"white_space": "nowrap", "flex_shrink": "0"}
