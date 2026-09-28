@@ -51,8 +51,8 @@ class ChatStatusRow(SQLModel, table=True):
     ENDED: ClassVar[frozenset[str]] = frozenset({"hr_rejected", "declined", "failed"})
     # 只能手动标记的面试进展
     MANUAL: ClassVar[frozenset[str]] = frozenset({"done", "passed", "failed"})
-    # 会话列表筛选；「所有面试」是任意面试状态
-    FILTERS: ClassVar[tuple[str, ...]] = ("全部", "所有面试", *LABELS.values())
+    # 会话列表筛选；「无状态」是未标记任何状态，「所有面试」是任意面试状态
+    FILTERS: ClassVar[tuple[str, ...]] = ("全部", "无状态", "所有面试", *LABELS.values())
     # 手动标记的选项；「无」是清除
     CHOICES: ClassVar[tuple[str, ...]] = ("无", *LABELS.values())
 
@@ -120,6 +120,8 @@ class ChatStatusRow(SQLModel, table=True):
         """状态值 ``status`` 是否符合筛选文案 ``wanted``（空串或「全部」不筛选）。"""
         if wanted in ("", "全部"):
             return True
+        if wanted == "无状态":
+            return status == ""
         if wanted == "所有面试":
             return status in cls.INTERVIEWS
         return cls.LABELS.get(status) == wanted

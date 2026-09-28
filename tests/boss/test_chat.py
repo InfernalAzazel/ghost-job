@@ -198,7 +198,7 @@ def test_status_follow_ai(tmp_db, before, outcome, interview, after):
 
 
 def test_conversations_filter_by_status(tmp_db):
-    for boss_id, name in (("boss-1", "王女士"), ("boss-2", "李先生"), ("boss-3", "赵女士")):
+    for boss_id, name in (("boss-1", "王女士"), ("boss-2", "李先生"), ("boss-3", "赵女士"), ("boss-4", "钱先生")):
         ChatMessageRow.record_new(
             [ChatMessage(mid=boss_id, from_hr=True, text="您好")], job_uid="", boss_id=boss_id, hr_name=name
         )
@@ -210,7 +210,8 @@ def test_conversations_filter_by_status(tmp_db):
     assert (items["boss-1"]["status"], items["boss-1"]["status_label"]) == ("invited", "有面试")
     assert [i["boss_id"] for i in ChatMessageRow.conversations(status="有面试")] == ["boss-1"]
     assert {i["boss_id"] for i in ChatMessageRow.conversations(status="所有面试")} == {"boss-1", "boss-2"}
-    assert len(ChatMessageRow.conversations(status="全部")) == 3
+    assert [i["boss_id"] for i in ChatMessageRow.conversations(status="无状态")] == ["boss-4"]
+    assert len(ChatMessageRow.conversations(status="全部")) == 4
     assert ChatMessageRow.conversations("王", status="面试不通过") == []
 
 
