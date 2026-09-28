@@ -82,13 +82,7 @@ class MessagesPage:
                     flex="1",
                     min_width="0",
                 ),
-                rx.select(
-                    MessagesState.interview_filters,
-                    value=MessagesState.interview_filter,
-                    on_change=MessagesState.set_interview_filter,
-                    size="2",
-                    width="96px",
-                ),
+                cls._interview_filter(),
                 rx.tooltip(
                     rx.icon_button(
                         rx.icon("refresh-cw", size=15),
@@ -124,6 +118,43 @@ class MessagesPage:
             min_width=cls.LIST_WIDTH,
             border_right=f"1px solid {BORDER}",
             height="100%",
+        )
+
+    @staticmethod
+    def _interview_filter() -> rx.Component:
+        """按面试标签筛选会话的图标菜单；筛选生效时图标高亮。"""
+        filtering = MessagesState.interview_filter != "全部"
+        return rx.menu.root(
+            rx.menu.trigger(
+                rx.icon_button(
+                    rx.icon("list-filter", size=15),
+                    variant=rx.cond(filtering, "soft", "ghost"),
+                    color_scheme=rx.cond(filtering, "teal", "gray"),
+                    size="2",
+                    title="按面试筛选",
+                ),
+            ),
+            rx.menu.content(
+                rx.text("按面试筛选", font_size="0.75em", color=MUTED, padding="0.3em 0.75em"),
+                rx.foreach(
+                    MessagesState.interview_filters,
+                    lambda label: rx.menu.item(
+                        rx.hstack(
+                            rx.text(label),
+                            rx.spacer(),
+                            rx.cond(
+                                label == MessagesState.interview_filter,
+                                rx.icon("check", size=14),
+                            ),
+                            width="100%",
+                            align="center",
+                            spacing="3",
+                        ),
+                        on_select=MessagesState.set_interview_filter(label),
+                    ),
+                ),
+                min_width="140px",
+            ),
         )
 
     @classmethod
