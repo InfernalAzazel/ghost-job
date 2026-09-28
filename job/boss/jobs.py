@@ -32,13 +32,34 @@ from job.utils import as_dict
 LogSink = Callable[[str, str], Awaitable[None]]
 
 if TYPE_CHECKING:
-    from patchright.async_api import Locator, Page, Response
+    from patchright.async_api import BrowserContext, Locator, Page, Response
 
     from job.boss.review import JobReviewer
     from job.boss.session import BossSession
 
 # 字体加密字符（Unicode 私用区）
 _ENCRYPTED = re.compile(r"[\ue000-\uf8ff]")
+# 职位详情页的职位描述
+DESCRIPTION = ".job-sec-text"
+
+
+async def read_description(context: BrowserContext, link: str, *, attempts: int = 3) -> str:
+    """在新标签页打开职位详情页读职位描述，读不到隔几秒重试；都失败返回空串。"""
+    for attempt in range(attempts):
+        if attempt:
+            await asyncio.sleep(random.uniform(2, 5))
+        detail = await context.new_page()
+        try:
+            await detail.goto(link, wait_until="domcontentloaded")
+            text = await detail.locator(DESCRIPTION).first.inner_text(timeout=15_000)
+            if text := text.strip():
+                return text
+        except PlaywrightError:
+            pass
+        finally:
+            with contextlib.suppress(PlaywrightError):
+                await detail.close()
+    return ""
 
 
 def _detail_path(*keys: str) -> AliasPath:
@@ -371,15 +392,19 @@ class JobScraper:
         return jobs[index] if index < len(jobs) else None
 
     async def _open_detail(self, page: Page, card: Locator, job: Job) -> Job:
-        """点击卡片，等详情接口返回并合并进 Job。"""
+        """点击卡片，等详情接口返回并合并进 Job；接口没给职位描述时打开详情页补读。"""
         try:
             async with page.expect_response(self._is_detail, timeout=8_000) as resp:
                 await card.click(timeout=5_000)
-            payload = await (await resp.value).json()
+            job = job.with_detail(as_dict(await (await resp.value).json()))
         except (PlaywrightError, ValueError):
-            await self._log(f"{job.title} 详情加载较慢，先按列表信息判断")
+            pass
+        if job.description or not job.link:
             return job
-        return job.with_detail(as_dict(payload))
+        if description := await read_description(page.context, job.link):
+            return job.model_copy(update={"description": description})
+        await self._log(f"{job.title} 职位详情加载失败，先按列表信息判断")
+        return job
 
     async def _load_more(self, page: Page) -> None:
         """滚到底部触发下一页；等不到列表接口就短暂等待。"""

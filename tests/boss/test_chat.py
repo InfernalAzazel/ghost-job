@@ -222,6 +222,22 @@ def test_known_job_keeps_previous_verdict(tmp_db):
     assert logs == []
 
 
+def test_known_job_without_description_is_filled(tmp_db):
+    JobRow.record(
+        Job(job_id="job-1", title="AI 应用工程师", company="示例科技"),
+        reason="可投",
+        score=80,
+        applied=True,
+    )
+    responder, _logs = _responder()
+    verdict, job = asyncio.run(responder._judge(None, job_from_boss_data(BOSS_DATA), "job-1"))
+    assert verdict == "合适（可投）" and job.description == "负责大模型应用落地"
+    row = JobRow.get_dict("job-1")
+    assert row["description"] == "负责大模型应用落地"
+    assert row["suitable"] and row["reason"] == "可投" and row["matchStatus"] == "80 分"
+    assert row["result"] == "已投递"
+
+
 def _sending_responder(
     resume_ok: bool = True, request_pending: bool = False
 ) -> tuple[ChatResponder, list[tuple[str, str]], list[str]]:

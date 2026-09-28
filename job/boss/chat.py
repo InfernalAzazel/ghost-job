@@ -25,7 +25,7 @@ from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 
 from job.boss.filters import BASE_URL, KeywordFilter, ReplyPaceProfile
-from job.boss.jobs import Job, LogSink
+from job.boss.jobs import Job, LogSink, read_description
 from job.models.chat import ChatMessage, ChatMessageRow, ChatRejectionRow
 from job.models.job import JobRow
 from job.models.setting import LlmSettings
@@ -212,8 +212,6 @@ class ChatResponder:
     # HR 主动索要附件简历的卡片，带「拒绝 / 同意」按钮
     RESUME_REQUEST = "附件简历"
     LOGIN = ".login-dialog-wrap"
-    # 职位详情页的职位描述
-    DESCRIPTION = ".job-sec-text"
     # 两次刷新会话列表之间的等待（秒）
     POLL: ClassVar[tuple[float, float]] = (60, 120)
     # 打开聊天页遇到网络异常时的重试间隔（秒）
@@ -490,7 +488,11 @@ class ChatResponder:
         库里已有就沿用之前的判断；没有说明是 HR 主动沟通的新岗位，按投递规则判断后入库。
         """
         if uid and (row := JobRow.get_dict(uid)):
-            job = job.model_copy(update={"description": row["description"]})
+            description = row["description"]
+            # 投递时详情接口偶尔没返回描述，这里补读并回写
+            if not description and (description := await self._description(page, job)):
+                JobRow.set_description(uid, description)
+            job = job.model_copy(update={"description": description})
             return self._verdict(row["suitable"], row["reason"]), job
         if not uid:
             return "", job
@@ -523,19 +525,12 @@ class ChatResponder:
         return f"{head}（{reason}）" if reason else head
 
     async def _description(self, page: Page, job: Job) -> str:
-        """在新标签页打开职位详情读职位描述；读不到返回空串。"""
+        """在新标签页打开职位详情读职位描述（失败会重试）；读不到返回空串。"""
         if not job.link:
             return ""
-        detail = await page.context.new_page()
-        try:
-            await detail.goto(job.link, wait_until="domcontentloaded")
-            return (await detail.locator(self.DESCRIPTION).first.inner_text(timeout=10_000)).strip()
-        except PlaywrightError:
+        if not (description := await read_description(page.context, job.link)):
             await self._log(f"{job.title} 职位详情加载失败，按已有信息判断", "warn")
-            return ""
-        finally:
-            with contextlib.suppress(PlaywrightError):
-                await detail.close()
+        return description
 
     async def _send(self, page: Page, text: str) -> bool:
         """模拟打字输入回复并发送；发出后返回 True。"""

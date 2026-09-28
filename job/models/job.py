@@ -312,6 +312,21 @@ class JobRow(SQLModel, table=True):
             return True
 
     @classmethod
+    def set_description(cls, uid: str, description: str) -> bool:
+        """补写职位描述，其余字段不变；岗位不存在返回 False。"""
+        from job.models import db_session
+
+        with db_session() as session:
+            row = session.get(cls, uid)
+            if row is None:
+                return False
+            row.description = description
+            row.updated_at = _now()
+            session.add(row)
+            session.commit()
+            return True
+
+    @classmethod
     def delete_by_uid(cls, uid: str) -> bool:
         """删除一条，不存在则 False。"""
         from job.models import db_session
