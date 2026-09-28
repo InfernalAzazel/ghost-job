@@ -11,12 +11,23 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from job import models as models_pkg
-from job.boss.chat import ChatDecision, ChatReplier, ChatResponder, Friend, job_from_boss_data
+from job.boss.chat import (
+    ChatDecision,
+    ChatReplier,
+    ChatResponder,
+    Friend,
+    job_from_boss_data,
+)
 from job.boss.filters import KeywordFilter
 from job.boss.jobs import Job
 from job.boss.review import Verdict
 from job.models import init_db, reset_engine
-from job.models.chat import ChatInterviewRow, ChatMessage, ChatMessageRow, ChatRejectionRow
+from job.models.chat import (
+    ChatInterviewRow,
+    ChatMessage,
+    ChatMessageRow,
+    ChatRejectionRow,
+)
 from job.models.job import JobRow
 from job.models.setting import LlmSettings
 

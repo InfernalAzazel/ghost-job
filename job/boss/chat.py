@@ -26,7 +26,12 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 
 from job.boss.filters import BASE_URL, KeywordFilter, ReplyPaceProfile
 from job.boss.jobs import Job, LogSink, read_description
-from job.models.chat import ChatInterviewRow, ChatMessage, ChatMessageRow, ChatRejectionRow
+from job.models.chat import (
+    ChatInterviewRow,
+    ChatMessage,
+    ChatMessageRow,
+    ChatRejectionRow,
+)
 from job.models.job import JobRow
 from job.models.setting import LlmSettings
 from job.utils import as_dict, log

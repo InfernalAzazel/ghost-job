@@ -20,6 +20,8 @@ class MessagesPage:
     SALARY = "#F26D5F"
     # 同一行里不被挤压换行的短文本
     NO_SHRINK: ClassVar[dict[str, Any]] = {"white_space": "nowrap", "flex_shrink": "0"}
+    # 面试标签的颜色
+    INTERVIEW_COLORS: ClassVar[dict[str, str]] = {"invited": "blue", "done": "green", "failed": "red"}
 
     @classmethod
     def create(cls) -> rx.Component:
@@ -78,6 +80,14 @@ class MessagesPage:
                     border_radius="8px",
                     padding_x="0.6em",
                     flex="1",
+                    min_width="0",
+                ),
+                rx.select(
+                    MessagesState.interview_filters,
+                    value=MessagesState.interview_filter,
+                    on_change=MessagesState.set_interview_filter,
+                    size="2",
+                    width="96px",
                 ),
                 rx.tooltip(
                     rx.icon_button(
@@ -141,6 +151,20 @@ class MessagesPage:
                         min_width="0",
                     ),
                     rx.spacer(),
+                    rx.cond(
+                        item["interview"] != "",
+                        rx.badge(
+                            item["interview_label"],
+                            color_scheme=rx.match(
+                                item["interview"],
+                                *cls.INTERVIEW_COLORS.items(),
+                                "gray",
+                            ),
+                            variant="soft",
+                            size="1",
+                            flex_shrink="0",
+                        ),
+                    ),
                     rx.cond(
                         item["rejected"] != "",
                         rx.badge(
@@ -248,6 +272,16 @@ class MessagesPage:
                 rx.text(chat["company"], font_size="0.85em", color=MUTED),
                 rx.cond(chat["hr_title"] != "", rx.text("·", color=MUTED)),
                 rx.text(chat["hr_title"], font_size="0.85em", color=MUTED),
+                rx.spacer(),
+                rx.text("面试", font_size="0.8em", color=MUTED, **cls.NO_SHRINK),
+                rx.select(
+                    MessagesState.interview_choices,
+                    value=MessagesState.active_interview,
+                    on_change=MessagesState.set_interview,
+                    size="1",
+                    width="110px",
+                ),
+                width="100%",
                 align="center",
                 spacing="2",
             ),
