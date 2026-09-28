@@ -31,7 +31,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatStatusRow(SQLModel, table=True):
-    """会话的沟通状态：面试进展或会话已结束（HR 拒绝 / 我婉拒），每个 HR 一个。
+    """会话的沟通状态：面试进展或会话已结束（HR 拒绝 / AI 已婉拒），每个 HR 一个。
 
     AI 回复时按判断自动更新；已面试、面试通过、面试不通过只能手动标记，AI 不会改动。
     """
@@ -44,7 +44,7 @@ class ChatStatusRow(SQLModel, table=True):
         "passed": "面试通过",
         "failed": "面试不通过",
         "hr_rejected": "HR 已拒绝",
-        "declined": "我婉拒",
+        "declined": "AI 已婉拒",
     }
     INTERVIEWS: ClassVar[frozenset[str]] = frozenset({"invited", "done", "passed", "failed"})
     # 会话已结束：HR 没有新消息时不再回复
@@ -95,7 +95,7 @@ class ChatStatusRow(SQLModel, table=True):
     def follow_ai(cls, boss_id: str, *, outcome: str, interview: bool, text: str) -> str | None:
         """按 AI 对会话的判断更新状态，返回变化后的状态值（清除为空串），没变返回 None。
 
-        HR 拒绝 / 我婉拒直接标记；继续沟通时识别到面试邀请标「有面试」，
+        HR 拒绝 / AI 已婉拒直接标记；继续沟通时识别到面试邀请标「有面试」，
         否则清掉之前的拒绝或婉拒；手动标记的面试进展不动。
         """
         before = cls.statuses().get(boss_id, "")

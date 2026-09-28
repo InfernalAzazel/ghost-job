@@ -166,7 +166,7 @@ def test_status_mark_and_clear(tmp_db):
     ChatStatusRow.mark("boss-1", "hr_rejected", text="不合适")
     assert ChatMessageRow.conversations()[0]["status_label"] == "HR 已拒绝"
     ChatStatusRow.mark("boss-1", "declined", text="感谢，暂不考虑")
-    assert ChatMessageRow.conversations()[0]["status_label"] == "我婉拒"
+    assert ChatMessageRow.conversations()[0]["status_label"] == "AI 已婉拒"
     assert ChatStatusRow.ended("boss-1")
     ChatStatusRow.clear("boss-1")
     assert ChatMessageRow.conversations()[0]["status_label"] == ""
