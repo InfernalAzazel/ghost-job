@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel
+from sqlalchemy import inspect
+from sqlalchemy import text as sql
 from sqlmodel import Field, SQLModel, col, select
+
+if TYPE_CHECKING:
+    from sqlalchemy import Engine
 
 
 def _now() -> datetime:
@@ -24,79 +29,45 @@ class ChatMessage(BaseModel):
     text: str = ""
 
 
-class ChatRejectionRow(SQLModel, table=True):
-    """已结束的会话：HR 说了不合适，或我方已婉拒；HR 再发新消息时由 AI 重新判断。"""
+class ChatStatusRow(SQLModel, table=True):
+    """会话的沟通状态：面试进展或会话已结束（HR 拒绝 / 我婉拒），每个 HR 一个。
 
-    __tablename__ = "chat_rejection"  # pyright: ignore[reportAssignmentType]
+    AI 回复时按判断自动更新；已面试、面试通过、面试不通过只能手动标记，AI 不会改动。
+    """
 
-    LABELS: ClassVar[dict[str, str]] = {"hr": "HR 已拒绝", "me": "已婉拒"}
+    __tablename__ = "chat_status"  # pyright: ignore[reportAssignmentType]
 
-    boss_id: str = Field(primary_key=True, description="HR 的加密 ID")
-    by: str = Field(description="谁拒绝的：hr / me")
-    text: str = Field(default="", description="拒绝的那句话")
-    created_at: datetime = Field(default_factory=_now, description="标记时间（UTC）")
-
-    @classmethod
-    def mark(cls, boss_id: str, *, by: str, text: str) -> None:
-        from job.models import db_session
-
-        with db_session() as session:
-            session.merge(cls(boss_id=boss_id, by=by, text=text))
-            session.commit()
-
-    @classmethod
-    def clear(cls, boss_id: str) -> None:
-        from job.models import db_session
-
-        with db_session() as session:
-            if row := session.get(cls, boss_id):
-                session.delete(row)
-                session.commit()
-
-    @classmethod
-    def labels(cls) -> dict[str, str]:
-        """HR → 标记文案（「HR 已拒绝」/「已婉拒」）。"""
-        from job.models import db_session
-
-        with db_session() as session:
-            return {r.boss_id: cls.LABELS.get(r.by, "") for r in session.exec(select(cls)).all()}
-
-
-class ChatInterviewRow(SQLModel, table=True):
-    """会话的面试标签：AI 识别到面试邀请时自动标「有面试」，其余由手动标记。"""
-
-    __tablename__ = "chat_interview"  # pyright: ignore[reportAssignmentType]
-
-    LABELS: ClassVar[dict[str, str]] = {"invited": "有面试", "done": "已面试", "failed": "面试不通过"}
-    # 会话列表筛选；「所有面试」是有任意面试标签
+    LABELS: ClassVar[dict[str, str]] = {
+        "invited": "有面试",
+        "done": "已面试",
+        "passed": "面试通过",
+        "failed": "面试不通过",
+        "hr_rejected": "HR 已拒绝",
+        "declined": "我婉拒",
+    }
+    INTERVIEWS: ClassVar[frozenset[str]] = frozenset({"invited", "done", "passed", "failed"})
+    # 会话已结束：HR 没有新消息时不再回复
+    ENDED: ClassVar[frozenset[str]] = frozenset({"hr_rejected", "declined", "failed"})
+    # 只能手动标记的面试进展
+    MANUAL: ClassVar[frozenset[str]] = frozenset({"done", "passed", "failed"})
+    # 会话列表筛选；「所有面试」是任意面试状态
     FILTERS: ClassVar[tuple[str, ...]] = ("全部", "所有面试", *LABELS.values())
     # 手动标记的选项；「无」是清除
     CHOICES: ClassVar[tuple[str, ...]] = ("无", *LABELS.values())
 
     boss_id: str = Field(primary_key=True, description="HR 的加密 ID")
-    status: str = Field(description="invited 有面试 / done 已面试 / failed 面试不通过")
+    status: str = Field(description="状态值，见 LABELS")
     source: str = Field(default="manual", description="auto AI 标记 / manual 手动标记")
+    text: str = Field(default="", description="触发标记的那句话（拒绝或婉拒时）")
     updated_at: datetime = Field(default_factory=_now, description="最后更新时间（UTC）")
 
     @classmethod
-    def mark(cls, boss_id: str, status: str, *, source: str = "manual") -> None:
+    def mark(cls, boss_id: str, status: str, *, source: str = "manual", text: str = "") -> None:
         from job.models import db_session
 
         with db_session() as session:
-            session.merge(cls(boss_id=boss_id, status=status, source=source))
+            session.merge(cls(boss_id=boss_id, status=status, source=source, text=text))
             session.commit()
-
-    @classmethod
-    def mark_invited_auto(cls, boss_id: str) -> bool:
-        """还没有任何面试标签时标为「有面试」（AI 标记）；已有标签不动，返回 False。"""
-        from job.models import db_session
-
-        with db_session() as session:
-            if session.get(cls, boss_id) is not None:
-                return False
-            session.add(cls(boss_id=boss_id, status="invited", source="auto"))
-            session.commit()
-            return True
 
     @classmethod
     def clear(cls, boss_id: str) -> None:
@@ -108,12 +79,40 @@ class ChatInterviewRow(SQLModel, table=True):
                 session.commit()
 
     @classmethod
-    def labels(cls) -> dict[str, str]:
-        """HR → 状态值（invited / done / failed）。"""
+    def statuses(cls) -> dict[str, str]:
+        """HR → 状态值。"""
         from job.models import db_session
 
         with db_session() as session:
             return {r.boss_id: r.status for r in session.exec(select(cls)).all()}
+
+    @classmethod
+    def ended(cls, boss_id: str) -> bool:
+        return cls.statuses().get(boss_id, "") in cls.ENDED
+
+    @classmethod
+    def follow_ai(cls, boss_id: str, *, outcome: str, interview: bool, text: str) -> str | None:
+        """按 AI 对会话的判断更新状态，返回变化后的状态值（清除为空串），没变返回 None。
+
+        HR 拒绝 / 我婉拒直接标记；继续沟通时识别到面试邀请标「有面试」，
+        否则清掉之前的拒绝或婉拒；手动标记的面试进展不动。
+        """
+        before = cls.statuses().get(boss_id, "")
+        if before in cls.MANUAL:
+            return None
+        if outcome in ("hr_rejected", "declined"):
+            after = outcome
+        elif interview:
+            after = "invited"
+        else:
+            after = "" if before in cls.ENDED else before
+        if after == before:
+            return None
+        if after:
+            cls.mark(boss_id, after, source="auto", text=text)
+        else:
+            cls.clear(boss_id)
+        return after
 
     @classmethod
     def matches(cls, status: str, wanted: str) -> bool:
@@ -121,8 +120,31 @@ class ChatInterviewRow(SQLModel, table=True):
         if wanted in ("", "全部"):
             return True
         if wanted == "所有面试":
-            return bool(status)
+            return status in cls.INTERVIEWS
         return cls.LABELS.get(status) == wanted
+
+    @staticmethod
+    def migrate_legacy(engine: Engine) -> None:
+        """把旧版的拒绝表 chat_rejection、面试表 chat_interview 并入本表后删除。"""
+        with engine.begin() as conn:
+            tables = set(inspect(conn).get_table_names())
+            if "chat_interview" in tables:
+                conn.execute(
+                    sql(
+                        "INSERT OR IGNORE INTO chat_status (boss_id, status, source, text, updated_at)"
+                        " SELECT boss_id, status, source, '', updated_at FROM chat_interview"
+                    )
+                )
+                conn.execute(sql("DROP TABLE chat_interview"))
+            if "chat_rejection" in tables:
+                conn.execute(
+                    sql(
+                        "INSERT OR IGNORE INTO chat_status (boss_id, status, source, text, updated_at)"
+                        " SELECT boss_id, CASE by WHEN 'hr' THEN 'hr_rejected' ELSE 'declined' END,"
+                        " 'auto', text, created_at FROM chat_rejection"
+                    )
+                )
+                conn.execute(sql("DROP TABLE chat_rejection"))
 
 
 class ChatMessageRow(SQLModel, table=True):
@@ -202,11 +224,11 @@ class ChatMessageRow(SQLModel, table=True):
         return self.created_at.replace(tzinfo=self.created_at.tzinfo or UTC).astimezone()
 
     @classmethod
-    def conversations(cls, search: str = "", interview: str = "") -> list[dict[str, Any]]:
-        """会话列表：每个 HR 一条，带关联岗位、最后一条消息与标签，最近的在前。
+    def conversations(cls, search: str = "", status: str = "") -> list[dict[str, Any]]:
+        """会话列表：每个 HR 一条，带关联岗位、最后一条消息与沟通状态，最近的在前。
 
-        ``search`` 模糊匹配 HR、公司或岗位名；``interview`` 按面试标签筛选，
-        取 ``ChatInterviewRow.FILTERS`` 里的文案。
+        ``search`` 模糊匹配 HR、公司或岗位名；``status`` 按沟通状态筛选，
+        取 ``ChatStatusRow.FILTERS`` 里的文案。
         """
         from job.models import db_session
         from job.models.job import JobRow
@@ -226,13 +248,12 @@ class ChatMessageRow(SQLModel, table=True):
                     select(JobRow).where(col(JobRow.uid).in_(set(job_uids.values())))
                 ).all()
             }
-        rejected = ChatRejectionRow.labels()
-        interviews = ChatInterviewRow.labels()
+        statuses = ChatStatusRow.statuses()
         today = datetime.now().astimezone().date()
         items = []
         for boss_id, last in sorted(latest.items(), key=lambda kv: kv[1].created_at, reverse=True):
-            status = interviews.get(boss_id, "")
-            if not ChatInterviewRow.matches(status, interview):
+            current = statuses.get(boss_id, "")
+            if not ChatStatusRow.matches(current, status):
                 continue
             job = jobs.get(job_uids.get(boss_id, ""))
             when = last.local_time
@@ -249,9 +270,8 @@ class ChatMessageRow(SQLModel, table=True):
                 "last_text": last.text,
                 "last_from_hr": last.from_hr,
                 "last_time": when.strftime("%H:%M" if when.date() == today else "%m-%d"),
-                "rejected": rejected.get(boss_id, ""),
-                "interview": status,
-                "interview_label": ChatInterviewRow.LABELS.get(status, ""),
+                "status": current,
+                "status_label": ChatStatusRow.LABELS.get(current, ""),
             }
             q = search.strip()
             if q and not any(q in item[k] for k in ("hr_name", "company", "title")):

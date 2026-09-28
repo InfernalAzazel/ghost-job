@@ -22,12 +22,7 @@ from job.boss.filters import KeywordFilter
 from job.boss.jobs import Job
 from job.boss.review import Verdict
 from job.models import init_db, reset_engine
-from job.models.chat import (
-    ChatInterviewRow,
-    ChatMessage,
-    ChatMessageRow,
-    ChatRejectionRow,
-)
+from job.models.chat import ChatMessage, ChatMessageRow, ChatStatusRow
 from job.models.job import JobRow
 from job.models.setting import LlmSettings
 
@@ -164,43 +159,81 @@ def test_replier_prompt_and_single_line_output():
     assert decision == ChatDecision(outcome="continue", reply="可以的， 我马上发送附件简历。", interview=True)
 
 
-def test_rejection_mark_and_clear(tmp_db):
+def test_status_mark_and_clear(tmp_db):
     ChatMessageRow.record_new(
         [ChatMessage(mid="1", from_hr=True, text="不合适")], job_uid="", boss_id="boss-1", hr_name="王女士"
     )
-    ChatRejectionRow.mark("boss-1", by="hr", text="不合适")
-    assert ChatMessageRow.conversations()[0]["rejected"] == "HR 已拒绝"
-    ChatRejectionRow.mark("boss-1", by="me", text="感谢，暂不考虑")
-    assert ChatMessageRow.conversations()[0]["rejected"] == "已婉拒"
-    ChatRejectionRow.clear("boss-1")
-    assert ChatMessageRow.conversations()[0]["rejected"] == ""
+    ChatStatusRow.mark("boss-1", "hr_rejected", text="不合适")
+    assert ChatMessageRow.conversations()[0]["status_label"] == "HR 已拒绝"
+    ChatStatusRow.mark("boss-1", "declined", text="感谢，暂不考虑")
+    assert ChatMessageRow.conversations()[0]["status_label"] == "我婉拒"
+    assert ChatStatusRow.ended("boss-1")
+    ChatStatusRow.clear("boss-1")
+    assert ChatMessageRow.conversations()[0]["status_label"] == ""
+    assert not ChatStatusRow.ended("boss-1")
 
 
-def test_interview_mark_auto_and_clear(tmp_db):
-    assert ChatInterviewRow.mark_invited_auto("boss-1")
-    assert ChatInterviewRow.labels() == {"boss-1": "invited"}
-    ChatInterviewRow.mark("boss-1", "done")
-    assert not ChatInterviewRow.mark_invited_auto("boss-1")
-    assert ChatInterviewRow.labels() == {"boss-1": "done"}
-    ChatInterviewRow.clear("boss-1")
-    assert ChatInterviewRow.labels() == {}
+@pytest.mark.parametrize(
+    ("before", "outcome", "interview", "after"),
+    [
+        ("", "continue", True, "invited"),
+        ("", "continue", False, ""),
+        ("", "hr_rejected", False, "hr_rejected"),
+        ("", "declined", True, "declined"),
+        ("hr_rejected", "continue", False, ""),
+        ("declined", "continue", True, "invited"),
+        ("invited", "continue", False, "invited"),
+        ("invited", "hr_rejected", False, "hr_rejected"),
+        ("done", "hr_rejected", True, "done"),
+        ("passed", "continue", True, "passed"),
+        ("failed", "declined", False, "failed"),
+    ],
+)
+def test_status_follow_ai(tmp_db, before, outcome, interview, after):
+    if before:
+        ChatStatusRow.mark("boss-1", before)
+    changed = ChatStatusRow.follow_ai("boss-1", outcome=outcome, interview=interview, text="t")
+    assert ChatStatusRow.statuses().get("boss-1", "") == after
+    assert changed == (after if after != before else None)
 
 
-def test_conversations_show_and_filter_interview(tmp_db):
+def test_conversations_filter_by_status(tmp_db):
     for boss_id, name in (("boss-1", "王女士"), ("boss-2", "李先生"), ("boss-3", "赵女士")):
         ChatMessageRow.record_new(
             [ChatMessage(mid=boss_id, from_hr=True, text="您好")], job_uid="", boss_id=boss_id, hr_name=name
         )
-    ChatInterviewRow.mark("boss-1", "invited", source="auto")
-    ChatInterviewRow.mark("boss-2", "failed")
+    ChatStatusRow.mark("boss-1", "invited", source="auto")
+    ChatStatusRow.mark("boss-2", "failed")
+    ChatStatusRow.mark("boss-3", "hr_rejected")
 
     items = {i["boss_id"]: i for i in ChatMessageRow.conversations()}
-    assert (items["boss-1"]["interview"], items["boss-1"]["interview_label"]) == ("invited", "有面试")
-    assert items["boss-3"]["interview_label"] == ""
-    assert [i["boss_id"] for i in ChatMessageRow.conversations(interview="有面试")] == ["boss-1"]
-    assert {i["boss_id"] for i in ChatMessageRow.conversations(interview="所有面试")} == {"boss-1", "boss-2"}
-    assert len(ChatMessageRow.conversations(interview="全部")) == 3
-    assert ChatMessageRow.conversations("王", interview="面试不通过") == []
+    assert (items["boss-1"]["status"], items["boss-1"]["status_label"]) == ("invited", "有面试")
+    assert [i["boss_id"] for i in ChatMessageRow.conversations(status="有面试")] == ["boss-1"]
+    assert {i["boss_id"] for i in ChatMessageRow.conversations(status="所有面试")} == {"boss-1", "boss-2"}
+    assert len(ChatMessageRow.conversations(status="全部")) == 3
+    assert ChatMessageRow.conversations("王", status="面试不通过") == []
+
+
+def test_legacy_tags_are_migrated(tmp_path, monkeypatch):
+    import sqlite3
+
+    db = tmp_path / "test.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("create table chat_rejection (boss_id text primary key, by text, text text, created_at text)")
+        conn.execute("insert into chat_rejection values ('boss-1', 'hr', '不合适', '2026-09-28 06:00:00')")
+        conn.execute("insert into chat_rejection values ('boss-2', 'me', '暂不考虑', '2026-09-28 06:00:00')")
+        conn.execute("create table chat_interview (boss_id text primary key, status text, source text, updated_at text)")
+        conn.execute("insert into chat_interview values ('boss-3', 'done', 'manual', '2026-09-28 06:00:00')")
+    monkeypatch.setattr(models_pkg, "DB_PATH", db)
+    monkeypatch.setattr(models_pkg, "DATA_DIR", tmp_path)
+    reset_engine()
+    try:
+        assert ChatStatusRow.statuses() == {"boss-1": "hr_rejected", "boss-2": "declined", "boss-3": "done"}
+        with sqlite3.connect(db) as conn:
+            tables = {r[0] for r in conn.execute("select name from sqlite_master where type='table'")}
+        assert not tables & {"chat_rejection", "chat_interview"}
+    finally:
+        reset_engine()
 
 
 class FakeReviewer:
@@ -311,7 +344,7 @@ def test_hr_rejection_is_marked_without_reply(tmp_db):
     decision = ChatDecision(outcome="hr_rejected")
     asyncio.run(responder._apply(None, friend, "job-1", decision, "暂时不符合我们的需求"))
     assert sent == []
-    assert ChatRejectionRow.labels() == {"boss-1": "HR 已拒绝"}
+    assert ChatStatusRow.statuses() == {"boss-1": "hr_rejected"}
     assert logs[-1][0] == "skip" and "HR 已拒绝" in logs[-1][1]
 
 
@@ -321,18 +354,18 @@ def test_decline_is_sent_then_marked(tmp_db):
     decision = ChatDecision(outcome="declined", reply="感谢，这个岗位暂不考虑")
     asyncio.run(responder._apply(None, friend, "job-1", decision, "考虑吗"))
     assert sent == ["感谢，这个岗位暂不考虑"]
-    assert ChatRejectionRow.labels() == {"boss-1": "已婉拒"}
+    assert ChatStatusRow.statuses() == {"boss-1": "declined"}
     assert logs[-1][0] == "reply"
 
 
 def test_continue_reply_clears_mark(tmp_db):
-    ChatRejectionRow.mark("boss-1", by="me", text="暂不考虑")
+    ChatStatusRow.mark("boss-1", "declined", text="暂不考虑")
     responder, _logs, sent = _sending_responder()
     friend = Friend.model_validate(FRIEND)
     decision = ChatDecision(outcome="continue", reply="好的，这个岗位可以聊聊")
     asyncio.run(responder._apply(None, friend, "job-1", decision, "换个岗位看看？"))
     assert sent == ["好的，这个岗位可以聊聊"]
-    assert ChatRejectionRow.labels() == {}
+    assert ChatStatusRow.statuses() == {}
 
 
 def test_resume_is_sent_after_reply_when_hr_asks(tmp_db):
@@ -367,25 +400,18 @@ def test_interview_invitation_is_marked(tmp_db):
     friend = Friend.model_validate(FRIEND)
     decision = ChatDecision(outcome="continue", reply="好的，周三下午可以", interview=True)
     asyncio.run(responder._apply(None, friend, "job-1", decision, "周三下午来面试可以吗"))
-    assert ChatInterviewRow.labels() == {"boss-1": "invited"}
+    assert ChatStatusRow.statuses() == {"boss-1": "invited"}
     assert any(level == "info" and "已标记有面试" in text for level, text in logs)
 
 
 def test_interview_detection_keeps_manual_status(tmp_db):
-    ChatInterviewRow.mark("boss-1", "done")
+    ChatStatusRow.mark("boss-1", "done")
     responder, logs, _sent = _sending_responder()
     friend = Friend.model_validate(FRIEND)
     decision = ChatDecision(outcome="hr_rejected", interview=True)
     asyncio.run(responder._apply(None, friend, "job-1", decision, "面试没通过，不好意思"))
-    assert ChatInterviewRow.labels() == {"boss-1": "done"}
+    assert ChatStatusRow.statuses() == {"boss-1": "done"}
     assert not any("已标记有面试" in text for _level, text in logs)
-
-
-def test_no_interview_is_not_marked(tmp_db):
-    responder, _logs, _sent = _sending_responder()
-    friend = Friend.model_validate(FRIEND)
-    asyncio.run(responder._apply(None, friend, "job-1", ChatDecision(outcome="continue", reply="好的"), "你好"))
-    assert ChatInterviewRow.labels() == {}
 
 
 def test_resume_not_sent_by_default(tmp_db):

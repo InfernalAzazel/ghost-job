@@ -20,8 +20,14 @@ class MessagesPage:
     SALARY = "#F26D5F"
     # 同一行里不被挤压换行的短文本
     NO_SHRINK: ClassVar[dict[str, Any]] = {"white_space": "nowrap", "flex_shrink": "0"}
-    # 面试标签的颜色
-    INTERVIEW_COLORS: ClassVar[dict[str, str]] = {"invited": "blue", "done": "green", "failed": "red"}
+    # 沟通状态标签的颜色，未列出的为灰色
+    STATUS_COLORS: ClassVar[dict[str, str]] = {
+        "invited": "green",
+        "done": "blue",
+        "passed": "green",
+        "failed": "red",
+        "hr_rejected": "red",
+    }
 
     @classmethod
     def create(cls) -> rx.Component:
@@ -82,7 +88,7 @@ class MessagesPage:
                     flex="1",
                     min_width="0",
                 ),
-                cls._interview_filter(),
+                cls._status_filter(),
                 rx.tooltip(
                     rx.icon_button(
                         rx.icon("refresh-cw", size=15),
@@ -121,9 +127,9 @@ class MessagesPage:
         )
 
     @staticmethod
-    def _interview_filter() -> rx.Component:
-        """按面试标签筛选会话的图标菜单；筛选生效时图标高亮。"""
-        filtering = MessagesState.interview_filter != "全部"
+    def _status_filter() -> rx.Component:
+        """按沟通状态筛选会话的图标菜单；筛选生效时图标高亮。"""
+        filtering = MessagesState.status_filter != "全部"
         return rx.menu.root(
             rx.menu.trigger(
                 rx.icon_button(
@@ -131,29 +137,31 @@ class MessagesPage:
                     variant=rx.cond(filtering, "soft", "ghost"),
                     color_scheme=rx.cond(filtering, "teal", "gray"),
                     size="2",
-                    title="按面试筛选",
+                    title="按沟通状态筛选",
                 ),
             ),
             rx.menu.content(
-                rx.text("按面试筛选", font_size="0.75em", color=MUTED, padding="0.3em 0.75em"),
+                rx.text("按沟通状态筛选", font_size="0.75em", color=MUTED, padding="0.3em 0.75em"),
                 rx.foreach(
-                    MessagesState.interview_filters,
+                    MessagesState.status_filters,
                     lambda label: rx.menu.item(
                         rx.hstack(
                             rx.text(label),
                             rx.spacer(),
                             rx.cond(
-                                label == MessagesState.interview_filter,
+                                label == MessagesState.status_filter,
                                 rx.icon("check", size=14),
                             ),
                             width="100%",
                             align="center",
                             spacing="3",
                         ),
-                        on_select=MessagesState.set_interview_filter(label),
+                        on_select=MessagesState.set_status_filter(label),
                     ),
                 ),
                 min_width="140px",
+                # 关闭后不把焦点还给按钮，否则按钮上会留一圈蓝色焦点框
+                on_close_auto_focus=rx.prevent_default,
             ),
         )
 
@@ -183,24 +191,14 @@ class MessagesPage:
                     ),
                     rx.spacer(),
                     rx.cond(
-                        item["interview"] != "",
+                        item["status"] != "",
                         rx.badge(
-                            item["interview_label"],
+                            item["status_label"],
                             color_scheme=rx.match(
-                                item["interview"],
-                                *cls.INTERVIEW_COLORS.items(),
+                                item["status"],
+                                *cls.STATUS_COLORS.items(),
                                 "gray",
                             ),
-                            variant="soft",
-                            size="1",
-                            flex_shrink="0",
-                        ),
-                    ),
-                    rx.cond(
-                        item["rejected"] != "",
-                        rx.badge(
-                            item["rejected"],
-                            color_scheme="gray",
                             variant="soft",
                             size="1",
                             flex_shrink="0",
@@ -304,13 +302,20 @@ class MessagesPage:
                 rx.cond(chat["hr_title"] != "", rx.text("·", color=MUTED)),
                 rx.text(chat["hr_title"], font_size="0.85em", color=MUTED),
                 rx.spacer(),
-                rx.text("面试", font_size="0.8em", color=MUTED, **cls.NO_SHRINK),
-                rx.select(
-                    MessagesState.interview_choices,
-                    value=MessagesState.active_interview,
-                    on_change=MessagesState.set_interview,
+                rx.text("沟通状态", font_size="0.8em", color=MUTED, **cls.NO_SHRINK),
+                rx.select.root(
+                    rx.select.trigger(width="116px"),
+                    rx.select.content(
+                        rx.foreach(
+                            MessagesState.status_choices,
+                            lambda label: rx.select.item(label, value=label),
+                        ),
+                        # 关闭后不把焦点还给下拉框，否则会留一圈蓝色焦点框
+                        on_close_auto_focus=rx.prevent_default,
+                    ),
+                    value=MessagesState.active_status,
+                    on_change=MessagesState.set_status,
                     size="1",
-                    width="110px",
                 ),
                 width="100%",
                 align="center",

@@ -26,12 +26,7 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 
 from job.boss.filters import BASE_URL, KeywordFilter, ReplyPaceProfile
 from job.boss.jobs import Job, LogSink, read_description
-from job.models.chat import (
-    ChatInterviewRow,
-    ChatMessage,
-    ChatMessageRow,
-    ChatRejectionRow,
-)
+from job.models.chat import ChatMessage, ChatMessageRow, ChatStatusRow
 from job.models.job import JobRow
 from job.models.setting import LlmSettings
 from job.utils import as_dict, log
@@ -403,8 +398,8 @@ class ChatResponder:
         if not (pending := self.unanswered(messages)):
             log(f"{friend.label} 没有待回复的消息（最后一条是系统消息），跳过", "chat")
             return
-        if not incoming and friend.boss_id in ChatRejectionRow.labels():
-            await self._log(f"{friend.label}（已标记为不合适，没有新消息，跳过）", "skip")
+        if not incoming and ChatStatusRow.ended(friend.boss_id):
+            await self._log(f"{friend.label}（会话已结束，没有新消息，跳过）", "skip")
             return
 
         verdict, job = await self._judge(page, job, uid)
@@ -437,11 +432,11 @@ class ChatResponder:
     async def _apply(
         self, page: Page, friend: Friend, uid: str, decision: ChatDecision, hr_text: str
     ) -> None:
-        """按 AI 的判断处理：识别到面试邀请先打标签；HR 已拒绝就只标记；否则发出回复，婉拒时标记、继续沟通时取消标记。"""
-        if decision.interview and ChatInterviewRow.mark_invited_auto(friend.boss_id):
-            await self._log(f"{friend.label}（识别到面试邀请，已标记有面试）")
+        """按 AI 的判断处理：HR 已拒绝就只更新沟通状态；否则发出回复，发出后再更新沟通状态。"""
         if decision.outcome == "hr_rejected":
-            ChatRejectionRow.mark(friend.boss_id, by="hr", text=hr_text)
+            ChatStatusRow.follow_ai(
+                friend.boss_id, outcome=decision.outcome, interview=decision.interview, text=hr_text
+            )
             await self._log(f"{friend.label}（HR 已拒绝，不再回复）", "skip")
             return
         text = decision.reply
@@ -450,10 +445,11 @@ class ChatResponder:
             return
         self._record(await self._read_messages(page), friend, uid, auto=True)
         declined = decision.outcome == "declined"
-        if declined:
-            ChatRejectionRow.mark(friend.boss_id, by="me", text=text)
-        else:
-            ChatRejectionRow.clear(friend.boss_id)
+        status = ChatStatusRow.follow_ai(
+            friend.boss_id, outcome=decision.outcome, interview=decision.interview, text=text
+        )
+        if status == "invited":
+            await self._log(f"{friend.label}（识别到面试邀请，已标记有面试）")
         self._replied += 1
         await self._log(f"回复 {friend.label}{'（已婉拒）' if declined else ''}：{text}", "reply")
         if decision.send_resume:
