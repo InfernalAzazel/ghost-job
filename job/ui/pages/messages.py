@@ -28,6 +28,11 @@ class MessagesPage:
         "failed": "red",
         "hr_rejected": "red",
     }
+    # 下拉选项悬停时 Radix 默认是实心强调色，改成与配置页下拉一致的浅灰底
+    MENU_ITEM: ClassVar[dict[str, Any]] = {
+        "&[data-highlighted]": {"background": "#f2f4f7", "color": TEXT},
+        "&[data-state='checked']": {"color": ACCENT},
+    }
 
     @classmethod
     def create(cls) -> rx.Component:
@@ -135,8 +140,10 @@ class MessagesPage:
             rx.menu.trigger(
                 rx.icon_button(
                     rx.icon("list-filter", size=15),
-                    variant=rx.cond(filtering, "soft", "ghost"),
-                    color_scheme=rx.cond(filtering, "teal", "gray"),
+                    variant="ghost",
+                    color_scheme="gray",
+                    color=rx.cond(filtering, ACCENT, MUTED),
+                    bg=rx.cond(filtering, ACCENT_SOFT, "transparent"),
                     size="2",
                     title="按沟通状态筛选",
                 ),
@@ -151,12 +158,14 @@ class MessagesPage:
                             rx.spacer(),
                             rx.cond(
                                 label == MessagesState.status_filter,
-                                rx.icon("check", size=14),
+                                rx.icon("check", size=14, color=ACCENT),
                             ),
                             width="100%",
                             align="center",
                             spacing="3",
                         ),
+                        color=rx.cond(label == MessagesState.status_filter, ACCENT, TEXT),
+                        style=MessagesPage.MENU_ITEM,
                         on_select=MessagesState.set_status_filter(label),
                     ),
                 ),
@@ -358,7 +367,9 @@ class MessagesPage:
                     rx.select.content(
                         rx.foreach(
                             MessagesState.status_choices,
-                            lambda label: rx.select.item(label, value=label),
+                            lambda label: rx.select.item(
+                                label, value=label, style=cls.MENU_ITEM
+                            ),
                         ),
                         # 关闭后不把焦点还给下拉框，否则会留一圈蓝色焦点框
                         on_close_auto_focus=rx.prevent_default,
