@@ -17,6 +17,9 @@ config = rx.Config(
     app_module_import="job.ui.app",
     cors_allowed_origins=["*"],
     show_built_with_reflex=False,
+    # 界面状态默认 1 小时没访问就被清掉：最小化挂机时自动投递/回复仍在跑，界面却变回「未开启」
+    # 名字带 redis，但未配置 Redis 时的内存状态也读这个值，不需要安装 Redis
+    redis_token_expiration=60 * 60 * 24 * 30,
     plugins=[
         DesktopPlugin(
             # 发布包内置 Python 后端；`reflex-desktop dev` 会自动改用本地 dev 服务
