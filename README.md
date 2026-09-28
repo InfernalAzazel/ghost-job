@@ -240,7 +240,9 @@ BOSS 直聘每天约 150 次沟通上限，Ghost Job 会在达到上限时自动
 已在 Windows 10 / 11 和 macOS 上测试可正常使用。不支持 Windows 7。Linux 提供了安装包，但尚未完整测试，遇到问题欢迎反馈。
 
 **Windows 打开时提示缺少 `python312.dll` 怎么办？**
-这是电脑里的 Python 环境冲突导致的，不是安装包损坏。常见情况是之前用 Python 官网安装包装过其他版本的 Python（例如 3.13），系统环境变量里的 Python 路径干扰了 Ghost Job 自带的运行环境。如果你平时需要使用 Python，建议改用 [uv](https://docs.astral.sh/uv/) 管理 Python，让各个 Python 版本互相隔离：
+先升级到最新版本。v0.4.5 及更早的部分版本打包时，有时会把 `python312.dll` 放错位置，从 v0.4.6 起打包时会自动检查，不会再出现。临时解决办法：把安装目录下 `python\python\` 里的 `python312.dll`、`python3.dll`、`vcruntime140.dll`、`vcruntime140_1.dll` 复制到 `ghost-job.exe` 所在的目录。
+
+升级后仍然报错，就可能是电脑里的 Python 环境冲突。常见情况是之前用 Python 官网安装包装过其他版本的 Python（例如 3.13），系统环境变量里的 Python 路径干扰了 Ghost Job 自带的运行环境。如果你平时需要使用 Python，建议改用 [uv](https://docs.astral.sh/uv/) 管理 Python，让各个 Python 版本互相隔离：
 
 1. 在「设置 → 应用」里卸载用官网安装包装的 Python，并检查「系统属性 → 环境变量」，删除 `Path` 里残留的 Python 路径，以及 `PYTHONHOME`、`PYTHONPATH` 变量（如果有）
 2. 打开 PowerShell，安装 uv：
