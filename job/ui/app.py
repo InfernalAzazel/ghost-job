@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import reflex as rx
 
+from job.ui.components.connection import connection_overlay
 from job.ui.pages.config import ConfigPage
 from job.ui.pages.jobs import JobsPage
 from job.ui.pages.messages import MessagesPage
@@ -20,6 +21,8 @@ app = rx.App(
         "body": {"height": "100%", "overflow": "hidden", "margin": "0"},
     },
 )
+# 替换默认的连接错误提示（Reflex 内置的 (5, "Overlay") 包装层）
+app.app_wraps[(5, "Overlay")] = lambda stateful: connection_overlay() if stateful else None
 app.add_page(
     WorkbenchPage.create,
     route="/",
