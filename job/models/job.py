@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import csv
-import io
+import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -18,16 +17,9 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _csv_cell(value: Any) -> Any:
-    """CSV 单元格：布尔转是/否，时间转本地时间，空值留空。"""
-    if value is None:
-        return ""
-    if isinstance(value, bool):
-        return "是" if value else "否"
-    if isinstance(value, datetime):
-        local = value.replace(tzinfo=value.tzinfo or UTC).astimezone()
-        return local.strftime("%Y-%m-%d %H:%M:%S")
-    return value
+def _local_iso(value: datetime) -> str:
+    """库里的 UTC 时间 → 带时区的本地时间文本。"""
+    return value.replace(tzinfo=value.tzinfo or UTC).astimezone().isoformat(timespec="seconds")
 
 
 class JobRow(SQLModel, table=True):
@@ -46,28 +38,6 @@ class JobRow(SQLModel, table=True):
     )
     # 是否合适筛选项（第一项为不筛选）
     SUITABLE_FILTERS: ClassVar[tuple[str, ...]] = ("全部", "合适", "不合适")
-    # 导出 CSV 的列：表字段 -> 表头；须覆盖全部表字段
-    CSV_COLUMNS: ClassVar[dict[str, str]] = {
-        "uid": "主键",
-        "job_id": "职位 ID",
-        "title": "岗位名称",
-        "company": "公司",
-        "salary": "薪资",
-        "location": "地点",
-        "experience": "经验",
-        "education": "学历",
-        "suitable": "是否合适",
-        "applied": "是否已投递",
-        "reason": "判断描述",
-        "match_score": "匹配度",
-        "hr_name": "HR",
-        "hr_title": "HR 职位",
-        "address": "工作地址",
-        "link": "岗位链接",
-        "description": "职位描述",
-        "created_at": "入库时间",
-        "updated_at": "更新时间",
-    }
 
     uid: str = Field(primary_key=True, description="主键：优先 job_id，否则用 link")
     job_id: str | None = Field(default=None, index=True)
@@ -244,10 +214,10 @@ class JobRow(SQLModel, table=True):
         return [r.to_dict() for r in rows]
 
     @classmethod
-    def to_csv(cls, uids: list[str] | None = None) -> tuple[str, int]:
-        """导出 CSV 文本与条数：``uids`` 为空导出全部，否则只导出这些岗位（新入库优先）。
+    def to_json(cls, uids: list[str] | None = None) -> tuple[str, int]:
+        """导出 JSON 文本与条数：``uids`` 为空导出全部，否则只导出这些岗位（新入库优先）。
 
-        文本带 UTF-8 BOM，Excel 直接打开中文不乱码。
+        每个岗位带全部表字段（时间为带时区的本地时间）与处理结果 ``result``。
         """
         from job.models import db_session
 
@@ -256,12 +226,14 @@ class JobRow(SQLModel, table=True):
             stmt = stmt.where(col(cls.uid).in_(uids))
         with db_session() as session:
             rows = session.exec(stmt).all()
-        buffer = io.StringIO()
-        writer = csv.writer(buffer)
-        writer.writerow(cls.CSV_COLUMNS.values())
-        for row in rows:
-            writer.writerow(_csv_cell(getattr(row, key)) for key in cls.CSV_COLUMNS)
-        return "\ufeff" + buffer.getvalue(), len(rows)
+        items = [
+            {
+                **{k: _local_iso(v) if isinstance(v, datetime) else v for k, v in row.model_dump().items()},
+                "result": row.result,
+            }
+            for row in rows
+        ]
+        return json.dumps(items, ensure_ascii=False, indent=2), len(items)
 
     @classmethod
     def get_dict(cls, uid: str) -> dict[str, Any] | None:

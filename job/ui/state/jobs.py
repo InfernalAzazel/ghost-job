@@ -24,7 +24,7 @@ _ANALYZE_CONCURRENCY = 4
 
 def _export_name() -> str:
     """导出文件名，带当前时间。"""
-    return datetime.now().astimezone().strftime("岗位数据-%Y%m%d-%H%M.csv")
+    return datetime.now().astimezone().strftime("岗位数据-%Y%m%d-%H%M.json")
 
 
 class JobsState(rx.State):
@@ -233,18 +233,18 @@ class JobsState(rx.State):
         return rx.toast.warning(f"分析完成 {done} 个，失败 {len(uids) - done} 个")
 
     @rx.event
-    def export_csv(self):
-        """导出 CSV：有勾选导出选中的，否则导出全部；桌面端弹系统保存框选位置。"""
+    def export_json(self):
+        """导出 JSON：有勾选导出选中的，否则导出全部；桌面端弹系统保存框选位置。"""
         self._export_uids = list(self.selected)
-        script = save_dialog_script(_export_name(), "CSV", "csv")
-        return rx.call_script(script, callback=JobsState.save_csv)
+        script = save_dialog_script(_export_name(), "JSON", "json")
+        return rx.call_script(script, callback=JobsState.save_json)
 
     @rx.event
-    def save_csv(self, path: str | None):
-        """把 CSV 写到保存框选中的路径；取消时 ``path`` 为空。"""
+    def save_json(self, path: str | None):
+        """把 JSON 写到保存框选中的路径；取消时 ``path`` 为空。"""
         if not path:
             return
-        text, count = JobRow.to_csv(self._export_uids or None)
+        text, count = JobRow.to_json(self._export_uids or None)
         if path == BROWSER_DOWNLOAD:
             return rx.download(data=text, filename=_export_name())
         try:

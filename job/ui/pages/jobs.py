@@ -112,11 +112,11 @@ class JobsPage:
 
     @staticmethod
     def _export_button(label: str) -> rx.Component:
-        """导出 CSV：没勾选时导出全部，勾选后只导出选中的。"""
+        """导出 JSON：没勾选时导出全部，勾选后只导出选中的。"""
         return rx.button(
             rx.icon("download", size=14),
             label,
-            on_click=JobsState.export_csv,
+            on_click=JobsState.export_json,
             variant="outline",
             size="2",
         )

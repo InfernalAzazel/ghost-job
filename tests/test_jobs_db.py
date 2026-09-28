@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import csv
-import io
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -116,24 +115,22 @@ def test_analysis_filter_and_score_kept_on_rescrape(tmp_db):
     assert JobRow.get_dict("a")["matchStatus"] == "70 分"
 
 
-def test_to_csv_exports_all_or_selected(tmp_db):
-    assert set(JobRow.CSV_COLUMNS) == set(JobRow.model_fields)
+def test_to_json_exports_all_or_selected(tmp_db):
     description = "负责 Agent, 含逗号\n换行"
     JobRow.record(
         _job("a", description=description), reason="技术栈吻合", score=88, applied=True
     )
     JobRow.record(_job("b"), suitable=False, reason="外包公司")
 
-    text, count = JobRow.to_csv()
-    assert count == 2 and text.startswith("\ufeff")
-    header, *rows = csv.reader(io.StringIO(text.lstrip("\ufeff")))
-    assert header == list(JobRow.CSV_COLUMNS.values())
-    by_uid = {r["主键"]: r for r in (dict(zip(header, r, strict=True)) for r in rows)}
-    a, b = by_uid["a"], by_uid["b"]
-    assert (a["是否合适"], a["是否已投递"], a["匹配度"]) == ("是", "是", "88")
-    assert a["判断描述"] == "技术栈吻合" and a["职位描述"] == description
-    assert (b["是否合适"], b["是否已投递"], b["匹配度"]) == ("否", "否", "")
-    assert len(a["入库时间"]) == len("2026-01-01 00:00:00")
+    text, count = JobRow.to_json()
+    data = json.loads(text)
+    assert count == 2
+    assert set(data[0]) == set(JobRow.model_fields) | {"result"}
+    a, b = ({j["uid"]: j for j in data}[k] for k in ("a", "b"))
+    assert (a["suitable"], a["applied"], a["match_score"], a["result"]) == (True, True, 88, "已投递")
+    assert a["reason"] == "技术栈吻合" and a["description"] == description
+    assert (b["suitable"], b["applied"], b["match_score"], b["result"]) == (False, False, None, "不合适")
+    assert datetime.fromisoformat(a["created_at"]).tzinfo is not None
 
-    text, count = JobRow.to_csv(["b"])
-    assert count == 1 and "岗位b" in text and "岗位a" not in text
+    text, count = JobRow.to_json(["b"])
+    assert count == 1 and [j["uid"] for j in json.loads(text)] == ["b"]
