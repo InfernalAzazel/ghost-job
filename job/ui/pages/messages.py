@@ -119,6 +119,7 @@ class MessagesPage:
                     flex="1",
                 ),
             ),
+            cls._export_bar(),
             spacing="0",
             width=cls.LIST_WIDTH,
             min_width=cls.LIST_WIDTH,
@@ -165,10 +166,59 @@ class MessagesPage:
             ),
         )
 
+    @staticmethod
+    def _export_bar() -> rx.Component:
+        """会话列表底部：全选、已选数量（点 × 取消选择）与导出 JSON；没勾选时导出全部。"""
+        selecting = MessagesState.selected_count > 0
+        return rx.hstack(
+            rx.checkbox(
+                checked=MessagesState.all_selected,
+                on_change=MessagesState.toggle_select_all,
+                disabled=MessagesState.conversations.length() == 0,
+            ),
+            rx.cond(
+                selecting,
+                rx.button(
+                    f"已选 {MessagesState.selected_count} 项",
+                    rx.icon("x", size=13),
+                    on_click=MessagesState.clear_selection,
+                    variant="ghost",
+                    color_scheme="gray",
+                    size="1",
+                    title="取消选择",
+                ),
+                rx.text("全选", font_size="0.8em", color=MUTED),
+            ),
+            rx.spacer(),
+            rx.button(
+                rx.icon("download", size=14),
+                rx.cond(selecting, "导出", "导出全部"),
+                on_click=MessagesState.export_json,
+                disabled=MessagesState.conversations.length() == 0,
+                variant="outline",
+                size="1",
+            ),
+            width="100%",
+            align="center",
+            spacing="2",
+            padding="0.6em 1em",
+            border_top=f"1px solid {BORDER}",
+            flex_shrink="0",
+        )
+
     @classmethod
     def _conversation(cls, item: ObjectVar[dict]) -> rx.Component:
         is_active = item["boss_id"] == MessagesState.active_id
         return rx.hstack(
+            # 点勾选框只勾选，不打开会话
+            rx.box(
+                rx.checkbox(
+                    checked=MessagesState.selected.contains(item["boss_id"]),
+                    on_change=MessagesState.toggle_select(item["boss_id"]),
+                ),
+                on_click=rx.stop_propagation,
+                display="flex",
+            ),
             cls._avatar(item["hr_name"], "40px"),
             rx.vstack(
                 rx.hstack(

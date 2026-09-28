@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import math
 from datetime import datetime
 from pathlib import Path
@@ -17,11 +16,10 @@ from job.models import init_db
 from job.models.job import JobRow
 from job.models.search import SearchConfigRow
 from job.models.setting import LlmSettings
+from job.ui.state.export import BROWSER_DOWNLOAD, save_dialog_script
 
 # AI 分析并发数
 _ANALYZE_CONCURRENCY = 4
-# 保存框回传的标记：不在桌面端，改用浏览器下载
-_BROWSER_DOWNLOAD = "__browser_download__"
 
 
 def _export_name() -> str:
@@ -238,15 +236,7 @@ class JobsState(rx.State):
     def export_csv(self):
         """导出 CSV：有勾选导出选中的，否则导出全部；桌面端弹系统保存框选位置。"""
         self._export_uids = list(self.selected)
-        options = {
-            "defaultPath": str(Path.home() / "Downloads" / _export_name()),
-            "filters": [{"name": "CSV", "extensions": ["csv"]}],
-        }
-        # 普通浏览器（开发调试）没有 Tauri 对话框，回传标记改用浏览器下载
-        script = (
-            f"window.__TAURI__?.dialog ? window.__TAURI__.dialog.save({json.dumps(options)})"
-            f" : {json.dumps(_BROWSER_DOWNLOAD)}"
-        )
+        script = save_dialog_script(_export_name(), "CSV", "csv")
         return rx.call_script(script, callback=JobsState.save_csv)
 
     @rx.event
@@ -255,7 +245,7 @@ class JobsState(rx.State):
         if not path:
             return
         text, count = JobRow.to_csv(self._export_uids or None)
-        if path == _BROWSER_DOWNLOAD:
+        if path == BROWSER_DOWNLOAD:
             return rx.download(data=text, filename=_export_name())
         try:
             Path(path).write_text(text, encoding="utf-8")

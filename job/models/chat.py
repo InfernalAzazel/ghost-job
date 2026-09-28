@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -301,3 +302,41 @@ class ChatMessageRow(SQLModel, table=True):
             }
             for r in rows
         ]
+
+    # 导出时会话里保留的字段（去掉列表展示用的最后一条消息）
+    EXPORT_FIELDS: ClassVar[tuple[str, ...]] = (
+        "boss_id", "hr_name", "hr_title", "company", "title", "salary", "location",
+        "link", "job_uid", "status", "status_label",
+    )
+
+    @classmethod
+    def to_json(cls, boss_ids: list[str] | None = None) -> tuple[str, int]:
+        """导出 JSON 文本与会话数：``boss_ids`` 为空导出全部，否则只导出这些会话。
+
+        每个会话带岗位、沟通状态与完整聊天记录（从早到晚），最近的会话在前。
+        """
+        from job.models import db_session
+
+        chats = [
+            {k: c[k] for k in cls.EXPORT_FIELDS}
+            for c in cls.conversations()
+            if not boss_ids or c["boss_id"] in boss_ids
+        ]
+        stmt = select(cls).where(col(cls.boss_id).in_([c["boss_id"] for c in chats]))
+        with db_session() as session:
+            rows = session.exec(stmt.order_by(col(cls.created_at), col(cls.mid))).all()
+        messages: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            messages.setdefault(r.boss_id, []).append(
+                {
+                    "mid": r.mid,
+                    "sender": "HR" if r.from_hr else "我",
+                    "from_hr": r.from_hr,
+                    "text": r.text,
+                    "auto": r.auto,
+                    "time": r.local_time.isoformat(timespec="seconds"),
+                }
+            )
+        for chat in chats:
+            chat["messages"] = messages.get(chat["boss_id"], [])
+        return json.dumps(chats, ensure_ascii=False, indent=2), len(chats)

@@ -214,6 +214,31 @@ def test_conversations_filter_by_status(tmp_db):
     assert ChatMessageRow.conversations("王", status="面试不通过") == []
 
 
+def test_export_json_all_or_selected(tmp_db):
+    JobRow.record(Job(job_id="job-1", title="AI 应用工程师", company="示例科技", salary="20-30K"))
+    ChatMessageRow.record_new(
+        [ChatMessage(mid="1", from_hr=True, text="您好"), ChatMessage(mid="2", from_hr=False, text="您好，在的")],
+        job_uid="job-1", boss_id="boss-1", hr_name="王女士",
+    )
+    ChatMessageRow.record_new(
+        [ChatMessage(mid="3", from_hr=True, text="考虑吗")], job_uid="", boss_id="boss-2", hr_name="李先生"
+    )
+    ChatStatusRow.mark("boss-1", "invited")
+
+    text, count = ChatMessageRow.to_json()
+    data = json.loads(text)
+    assert count == 2 and {c["boss_id"] for c in data} == {"boss-1", "boss-2"}
+
+    text, count = ChatMessageRow.to_json(["boss-1"])
+    (chat,) = json.loads(text)
+    assert count == 1
+    assert (chat["hr_name"], chat["company"], chat["title"], chat["salary"]) == ("王女士", "示例科技", "AI 应用工程师", "20-30K")
+    assert (chat["status"], chat["status_label"]) == ("invited", "有面试")
+    assert [(m["sender"], m["text"], m["auto"]) for m in chat["messages"]] == [("HR", "您好", False), ("我", "您好，在的", False)]
+    assert chat["messages"][0]["time"].startswith("20")
+    assert "last_text" not in chat
+
+
 def test_legacy_tags_are_migrated(tmp_path, monkeypatch):
     import sqlite3
 
