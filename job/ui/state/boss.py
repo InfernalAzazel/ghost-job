@@ -43,10 +43,12 @@ _MAX_LOG = 200
 class BossState(rx.State):
     boss_state: str = "空闲"
     busy: bool = False
-    # 自动回复是否运行中、状态文案与本次回复条数
+    # 自动回复是否运行中、状态文案、本次回复条数、收到的 HR 消息条数与跳过的会话数
     reply_busy: bool = False
     reply_state: str = "未开启"
     reply_count: int = 0
+    recv_count: int = 0
+    reply_skip_count: int = 0
     # 运行日志（新的在前）：{time, level, text}
     # level 为 info / ok 投递 / dup 重复 / skip 跳过 / warn / recv 收到消息 / reply 已回复
     log: list[dict[str, str]] = rx.field(default_factory=list)
@@ -130,14 +132,22 @@ class BossState(rx.State):
             self.reply_busy = True
             self.reply_state = "回复中"
             self.reply_count = 0
+            self.recv_count = 0
+            self.reply_skip_count = 0
             self._push_log(f"开始自动回复：{pace.describe()}")
             if not _session.is_open:
                 self._push_log("正在打开浏览器…")
 
         async def on_log(level: str, text: str) -> None:
             async with self:
-                if level == "reply":
+                # 「回复」级别还有发简历、同意简历请求等附加记录，只数真正发出的回复
+                if level == "reply" and text.startswith("回复 "):
                     self.reply_count += 1
+                elif level == "recv":
+                    self.recv_count += 1
+                # 新岗位判为不合适时仍会回复（婉拒），不算跳过
+                elif level == "skip" and "新岗位" not in text:
+                    self.reply_skip_count += 1
                 self._push_log(text, level)
 
         try:

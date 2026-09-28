@@ -92,7 +92,7 @@ class WorkbenchPage:
         stopping: rx.Var,
         icon: str,
         start_label: str,
-        stop_label: rx.Var | str,
+        stop_label: str,
         on_start,
         on_stop,
     ) -> rx.Component:
@@ -169,7 +169,7 @@ class WorkbenchPage:
                     stopping=BossState.boss_state == "停止中",
                     icon="send",
                     start_label="开始自动投递",
-                    stop_label=f"停止投递（本次已投 {BossState.session_count} 个）",
+                    stop_label="停止投递",
                     on_start=BossState.start_apply,
                     on_stop=BossState.stop_apply,
                 ),
@@ -178,7 +178,7 @@ class WorkbenchPage:
                     stopping=BossState.reply_state == "停止中",
                     icon="message-circle",
                     start_label="开始自动回复",
-                    stop_label=f"停止回复（本次已回 {BossState.reply_count} 条）",
+                    stop_label="停止回复",
                     on_start=BossState.start_reply,
                     on_stop=BossState.stop_reply,
                 ),
@@ -264,6 +264,12 @@ class WorkbenchPage:
                     rx.text(
                         f"本次投递 {BossState.session_count} · 重复 {BossState.dup_count}"
                         f" · 跳过 {BossState.skip_count} · 共 {BossState.log.length()} 条",
+                        font_size="0.75em",
+                        color=MUTED,
+                    ),
+                    rx.text(
+                        f"本次回复 {BossState.reply_count} · 收到 {BossState.recv_count}"
+                        f" · 跳过 {BossState.reply_skip_count}",
                         font_size="0.75em",
                         color=MUTED,
                     ),
