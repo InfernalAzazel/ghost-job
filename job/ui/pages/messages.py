@@ -305,7 +305,11 @@ class MessagesPage:
         mine = ~message["from_hr"].to(bool)
         body = rx.vstack(
             rx.box(
-                rx.text(message["text"], font_size="0.9em", color=TEXT, white_space="pre-wrap"),
+                rx.cond(
+                    message["text"].to(str) != "",
+                    rx.text(message["text"], font_size="0.9em", color=TEXT, white_space="pre-wrap"),
+                    rx.text("[卡片消息，请在 BOSS 直聘查看]", font_size="0.9em", color=MUTED),
+                ),
                 bg=rx.cond(mine, ACCENT_SOFT, CARD),
                 border=rx.cond(mine, "1px solid transparent", f"1px solid {BORDER}"),
                 border_radius="10px",

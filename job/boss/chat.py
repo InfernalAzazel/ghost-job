@@ -209,6 +209,8 @@ class ChatResponder:
     RESUME_BUTTON = ".chat-controls .toolbar-btn"
     RESUME_PANEL = ".panel-resume"
     RESUME_SENT = "附件简历请求已发送"
+    # HR 主动索要附件简历的卡片，带「拒绝 / 同意」按钮
+    RESUME_REQUEST = "附件简历"
     LOGIN = ".login-dialog-wrap"
     # 职位详情页的职位描述
     DESCRIPTION = ".job-sec-text"
@@ -219,15 +221,38 @@ class ChatResponder:
     # 打字时每个字的间隔（毫秒）
     TYPING: ClassVar[tuple[float, float]] = (80, 220)
     # 读取当前会话消息：[{mid, from_hr, text}]，系统提示等既不是 HR 也不是我的跳过
+    # HR 索要简历、交换微信等卡片没有 .text-content，去掉时间、头像和按钮后取剩下的文字
     READ_JS = """
-    (selector) => [...document.querySelectorAll(selector)]
-      .filter(li => li.dataset.mid
-        && (li.classList.contains('item-friend') || li.classList.contains('item-myself')))
-      .map(li => ({
-        mid: li.dataset.mid,
-        from_hr: li.classList.contains('item-friend'),
-        text: (li.querySelector('.text-content')?.innerText || '').trim(),
-      }))
+    (selector) => {
+      const NOISE = '.message-time, .time, .figure, .avatar, img, button, [class*="btn"],'
+        + ' [class*="status"], [class*="operate"]';
+      const BUTTONS = new Set(['拒绝', '同意', '接受', '查看', '确定', '取消']);
+      const cardText = (li) => {
+        const parts = [];
+        const noisy = (el) => {
+          const hit = el.closest(NOISE);
+          return hit && hit !== li && li.contains(hit);
+        };
+        const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+        for (let node; (node = walker.nextNode());) {
+          const text = node.textContent.trim();
+          if (text && !noisy(node.parentElement) && !BUTTONS.has(text)
+              && !/^\\d{1,2}:\\d{2}$/.test(text)) parts.push(text);
+        }
+        return parts.join(' ');
+      };
+      return [...document.querySelectorAll(selector)]
+        .filter(li => li.dataset.mid
+          && (li.classList.contains('item-friend') || li.classList.contains('item-myself')))
+        .map(li => {
+          const text = li.querySelector('.text-content')?.innerText?.trim();
+          return {
+            mid: li.dataset.mid,
+            from_hr: li.classList.contains('item-friend'),
+            text: text || cardText(li),
+          };
+        });
+    }
     """
 
     def __init__(self, session: BossSession) -> None:
@@ -260,6 +285,8 @@ class ChatResponder:
         只在回复时段内回复；HR 主动沟通的新岗位按 ``keywords`` 与 ``reviewer`` 判断是否合适后入库。
         """
         self._stop.clear()
+        # 重新开启时再检查一遍，上次停止前没回复完的会话不会被漏掉
+        self._handled.clear()
         self._replier = replier
         self._pace = pace or ReplyPaceProfile()
         self._keywords = keywords or KeywordFilter()
@@ -418,7 +445,9 @@ class ChatResponder:
         self._replied += 1
         await self._log(f"回复 {friend.label}{'（已婉拒）' if declined else ''}：{text}", "reply")
         if decision.send_resume:
-            if await self._send_resume(page):
+            if await self._accept_resume_request(page):
+                await self._log(f"{friend.label}（已同意 HR 的附件简历请求）", "reply")
+            elif await self._send_resume(page):
                 await self._log(f"{friend.label}（已发送附件简历请求，对方确认后发到邮箱）", "reply")
             else:
                 await self._log(f"{friend.label}（发简历失败，请手动发送）", "warn")
@@ -519,6 +548,22 @@ class ChatResponder:
             await page.locator(self.SEND).click(timeout=5_000)
             for _ in range(20):
                 if await mine.count() > before:
+                    return True
+                await page.wait_for_timeout(500)
+        except PlaywrightError:
+            return False
+        return False
+
+    async def _accept_resume_request(self, page: Page) -> bool:
+        """HR 发来「我想要一份您的附件简历」卡片时点「同意」；没有待处理的请求或点完按钮没消失返回 False。"""
+        card = page.locator(f"{self.MESSAGE}.item-friend", has_text=self.RESUME_REQUEST).last
+        agree = card.get_by_text("同意", exact=True)
+        try:
+            if not await agree.count() or not await agree.first.is_visible():
+                return False
+            await agree.first.click(timeout=5_000)
+            for _ in range(20):
+                if not await agree.count() or not await agree.first.is_visible():
                     return True
                 await page.wait_for_timeout(500)
         except PlaywrightError:

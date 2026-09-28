@@ -97,6 +97,26 @@ def test_record_new_skips_known_messages(tmp_db):
     ]
 
 
+def test_record_new_fills_empty_card_text(tmp_db):
+    kwargs = {"job_uid": "", "boss_id": "boss-1", "hr_name": "钟女士"}
+    ChatMessageRow.record_new([ChatMessage(mid="1", from_hr=True, text="")], **kwargs)
+
+    card = ChatMessage(mid="1", from_hr=True, text="我想要一份您的附件简历，您是否同意")
+    assert ChatMessageRow.record_new([card], **kwargs) == []
+    assert ChatMessageRow.list_for_boss("boss-1")[0]["text"] == card.text
+
+
+def test_record_new_replaces_temporary_mid_of_auto_reply(tmp_db):
+    kwargs = {"job_uid": "job-1", "boss_id": "boss-1", "hr_name": "林女士"}
+    hr = ChatMessage(mid="1", from_hr=True, text="发下简历")
+    ChatMessageRow.record_new([hr, ChatMessage(mid="temp", from_hr=False, text="简历已发您")], auto=True, **kwargs)
+
+    fresh = ChatMessageRow.record_new([hr, ChatMessage(mid="2", from_hr=False, text="简历已发您")], **kwargs)
+    assert [m.mid for m in fresh] == ["2"]
+    history = ChatMessageRow.list_for_boss("boss-1")
+    assert [(h["mid"], h["auto"]) for h in history] == [("1", False), ("2", True)]
+
+
 def test_conversations_join_job_and_filter(tmp_db):
     JobRow.record(Job(job_id="job-1", title="AI 应用工程师", company="示例科技", hr_title="HR"))
     ChatMessageRow.record_new(
@@ -203,7 +223,7 @@ def test_known_job_keeps_previous_verdict(tmp_db):
 
 
 def _sending_responder(
-    resume_ok: bool = True,
+    resume_ok: bool = True, request_pending: bool = False
 ) -> tuple[ChatResponder, list[tuple[str, str]], list[str]]:
     responder, logs = _responder()
     sent: list[str] = []
@@ -211,6 +231,11 @@ def _sending_responder(
     async def send(_page, text: str) -> bool:
         sent.append(text)
         return True
+
+    async def accept_resume_request(_page) -> bool:
+        if request_pending:
+            sent.append("<同意>")
+        return request_pending
 
     async def send_resume(_page) -> bool:
         sent.append("<简历>")
@@ -220,6 +245,7 @@ def _sending_responder(
         return [ChatMessage(mid=f"me-{i}", from_hr=False, text=t) for i, t in enumerate(sent)]
 
     responder._send = send  # type: ignore[method-assign]
+    responder._accept_resume_request = accept_resume_request  # type: ignore[method-assign]
     responder._send_resume = send_resume  # type: ignore[method-assign]
     responder._read_messages = read  # type: ignore[method-assign]
     return responder, logs, sent
@@ -262,6 +288,15 @@ def test_resume_is_sent_after_reply_when_hr_asks(tmp_db):
     asyncio.run(responder._apply(None, friend, "job-1", decision, "方便发份简历吗"))
     assert sent == ["好的，简历发您了", "<简历>"]
     assert any(level == "reply" and "已发送附件简历" in text for level, text in logs)
+
+
+def test_hr_resume_request_is_accepted_instead_of_sending(tmp_db):
+    responder, logs, sent = _sending_responder(request_pending=True)
+    friend = Friend.model_validate(FRIEND)
+    decision = ChatDecision(outcome="continue", reply="好的，已同意", send_resume=True)
+    asyncio.run(responder._apply(None, friend, "job-1", decision, "我想要一份您的附件简历，您是否同意"))
+    assert sent == ["好的，已同意", "<同意>"]
+    assert any(level == "reply" and "已同意 HR 的附件简历请求" in text for level, text in logs)
 
 
 def test_resume_failure_asks_for_manual_send(tmp_db):

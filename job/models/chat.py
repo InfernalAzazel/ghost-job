@@ -27,7 +27,7 @@ class ChatMessage(BaseModel):
 class ChatRejectionRow(SQLModel, table=True):
     """已结束的会话：HR 说了不合适，或我方已婉拒；HR 再发新消息时由 AI 重新判断。"""
 
-    __tablename__ = "chat_rejection"
+    __tablename__ = "chat_rejection"  # pyright: ignore[reportAssignmentType]
 
     LABELS: ClassVar[dict[str, str]] = {"hr": "HR 已拒绝", "me": "已婉拒"}
 
@@ -65,7 +65,7 @@ class ChatRejectionRow(SQLModel, table=True):
 class ChatMessageRow(SQLModel, table=True):
     """与 HR 的一条聊天消息。"""
 
-    __tablename__ = "chat_message"
+    __tablename__ = "chat_message"  # pyright: ignore[reportAssignmentType]
 
     mid: str = Field(primary_key=True, description="BOSS 消息 ID")
     job_uid: str = Field(default="", index=True, description="关联岗位主键（job.uid），无岗位时为空")
@@ -91,22 +91,44 @@ class ChatMessageRow(SQLModel, table=True):
 
         messages = [m for m in messages if m.mid]
         with db_session() as session:
-            known = set(
-                session.exec(
-                    select(cls.mid).where(col(cls.mid).in_([m.mid for m in messages]))
+            rows = {
+                row.mid: row
+                for row in session.exec(
+                    select(cls).where(col(cls.mid).in_([m.mid for m in messages]))
                 ).all()
-            )
-            fresh = [m for m in messages if m.mid not in known]
+            }
+            # 之前没读到文字的卡片消息（如 HR 索要简历），这次读到了就补上
+            for m in messages:
+                if (row := rows.get(m.mid)) is not None and not row.text and m.text:
+                    row.text = m.text
+                    session.add(row)
+            fresh = [m for m in messages if m.mid not in rows]
+            # 自动回复刚发出就入库，那时页面给的是临时 ID，之后换成正式 ID；按文字认出来换成正式 ID
+            stale = {
+                row.text: row
+                for row in session.exec(
+                    select(cls).where(
+                        cls.boss_id == boss_id,
+                        col(cls.auto).is_(True),
+                        col(cls.mid).not_in([m.mid for m in messages]),
+                    )
+                ).all()
+            } if any(not m.from_hr for m in fresh) else {}
             for m in fresh:
+                old = None if m.from_hr else stale.pop(m.text, None)
+                if old is not None:
+                    session.delete(old)
+                    session.flush()
                 session.add(
                     cls(
                         mid=m.mid,
-                        job_uid=job_uid,
+                        job_uid=old.job_uid if old else job_uid,
                         boss_id=boss_id,
                         hr_name=hr_name,
                         from_hr=m.from_hr,
                         text=m.text,
-                        auto=auto and not m.from_hr,
+                        auto=old.auto if old else auto and not m.from_hr,
+                        created_at=old.created_at if old else _now(),
                     )
                 )
             session.commit()
