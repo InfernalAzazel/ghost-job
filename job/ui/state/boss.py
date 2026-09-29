@@ -9,6 +9,7 @@ from patchright.async_api import Error as PlaywrightError
 from sqlalchemy.exc import SQLAlchemyError
 
 from job.boss.chat import ChatReplier, ChatResponder
+from job.boss.chat_sync import ChatSyncer
 from job.boss.filters import KeywordFilter, PaceProfile, SearchUrl
 from job.boss.jobs import JobScraper
 from job.boss.review import JobReviewer
@@ -21,6 +22,7 @@ from job.models.setting import AutoReplySettings, LlmSettings
 _session = BossSession()
 _scraper = JobScraper(_session)
 _responder = ChatResponder(_session)
+_syncer = ChatSyncer(_session)
 
 # 投递结束状态 → 状态文案
 _STATUS = {
@@ -94,6 +96,7 @@ class BossState(rx.State):
     async def close_boss(self):
         _scraper.request_stop()
         _responder.request_stop()
+        _syncer.request_stop()
         await _session.close()
         self.boss_state = "空闲"
         self.busy = False
@@ -118,7 +121,9 @@ class BossState(rx.State):
             config = SearchConfigRow.load()
             resume = str(config.get("resume_text") or "").strip()
             problem = (
-                "请先在「求职配置 → 自动回复」开启自动回复"
+                "正在同步会话，请等同步结束或停止后再开启自动回复"
+                if _syncer.running
+                else "请先在「求职配置 → 自动回复」开启自动回复"
                 if not settings.enabled
                 else "请先在配置中心开通「AI 服务」"
                 if not llm.ready
@@ -178,6 +183,9 @@ class BossState(rx.State):
         """按求职配置逐个城市自动投递；浏览器未打开时自动打开。"""
         async with self:
             if self.busy:
+                return
+            if _syncer.running:
+                self._push_log("正在同步会话，请等同步结束或停止后再开始投递", "warn")
                 return
             config = SearchConfigRow.load()
             query = str(config.get("query") or "").strip()

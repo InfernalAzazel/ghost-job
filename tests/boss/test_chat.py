@@ -575,7 +575,7 @@ def test_reopen_retries_until_network_recovers():
     async def sleep(seconds: float) -> None:
         waits.append(seconds)
 
-    responder._open_page = open_page  # type: ignore[method-assign]
+    responder.open_page = open_page  # type: ignore[method-assign]
     responder._sleep = sleep  # type: ignore[method-assign]
     assert asyncio.run(responder._reopen(None))
     assert waits == [ChatResponder.RETRY] * 2
@@ -591,7 +591,7 @@ def test_reopen_stops_waiting_when_stopped():
     async def sleep(_seconds: float) -> None:
         responder.request_stop()
 
-    responder._open_page = open_page  # type: ignore[method-assign]
+    responder.open_page = open_page  # type: ignore[method-assign]
     responder._sleep = sleep  # type: ignore[method-assign]
     assert asyncio.run(responder._reopen(None))
 

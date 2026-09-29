@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import reflex as rx
 from reflex.vars import ObjectVar
@@ -12,18 +12,27 @@ from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
 from job.ui.state.company import CompanyState
 from job.ui.state.messages import MessagesState
-from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
+from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT, color_by
+
+if TYPE_CHECKING:
+    from reflex_components_radix.themes.base import LiteralAccentColor
 
 
 class MessagesPage:
     """与 HR 的聊天记录，布局参照 BOSS 直聘消息页。"""
 
     LIST_WIDTH = "330px"
+    LIST_ID = "conversation-list"
+    # 会话列表滚动停下时离底部不到约 8 个会话的高度，就加载下一批
+    NEAR_BOTTOM_JS = (
+        f"(() => {{ const el = document.getElementById('{LIST_ID}');"
+        " return !!el && el.scrollHeight - el.scrollTop - el.clientHeight < 600; })()"
+    )
     SALARY = "#F26D5F"
     # 同一行里不被挤压换行的短文本
     NO_SHRINK: ClassVar[dict[str, Any]] = {"white_space": "nowrap", "flex_shrink": "0"}
     # 沟通状态标签的颜色，未列出的为灰色
-    STATUS_COLORS: ClassVar[dict[str, str]] = {
+    STATUS_COLORS: ClassVar[dict[str, LiteralAccentColor]] = {
         "invited": "green",
         "done": "blue",
         "passed": "green",
@@ -90,6 +99,20 @@ class MessagesPage:
                                 "outline": "none",
                             },
                         ),
+                        # 输入框自适应宽度，按钮出现时只是变窄；不占位，免得挤掉占位文字
+                        rx.cond(
+                            MessagesState.search != "",
+                            rx.icon_button(
+                                rx.icon("x", size=14),
+                                on_click=MessagesState.set_search(""),
+                                variant="ghost",
+                                color_scheme="gray",
+                                size="1",
+                                radius="full",
+                                cursor="pointer",
+                                title="清空搜索",
+                            ),
+                        ),
                         spacing="2",
                         align="center",
                     ),
@@ -101,6 +124,17 @@ class MessagesPage:
                     min_width="0",
                 ),
                 cls._status_filter(),
+                rx.tooltip(
+                    rx.icon_button(
+                        rx.icon("cloud-download", size=15),
+                        on_click=MessagesState.sync,
+                        disabled=MessagesState.syncing,
+                        variant="ghost",
+                        color_scheme="gray",
+                        size="2",
+                    ),
+                    content="同步 BOSS 上聊过、还没入库的会话",
+                ),
                 rx.tooltip(
                     rx.icon_button(
                         rx.icon("refresh-cw", size=15),
@@ -116,11 +150,16 @@ class MessagesPage:
                 padding="1em",
                 border_bottom=f"1px solid {BORDER}",
             ),
+            rx.cond(MessagesState.syncing, cls._sync_bar()),
             rx.cond(
                 MessagesState.conversations.length() > 0,
                 rx.box(
                     rx.foreach(
                         MessagesState.conversations, lambda c: cls._conversation(c)
+                    ),
+                    id=cls.LIST_ID,
+                    on_scroll_end=rx.call_script(
+                        cls.NEAR_BOTTOM_JS, callback=MessagesState.load_more
                     ),
                     width="100%",
                     flex="1",
@@ -139,6 +178,36 @@ class MessagesPage:
             min_width=cls.LIST_WIDTH,
             border_right=f"1px solid {BORDER}",
             height="100%",
+        )
+
+    @staticmethod
+    def _sync_bar() -> rx.Component:
+        """同步中：进度文案与停止按钮。"""
+        return rx.hstack(
+            rx.spinner(size="1", color=ACCENT),
+            rx.text(
+                MessagesState.sync_text,
+                font_size="0.8em",
+                color=MUTED,
+                flex="1",
+                min_width="0",
+                overflow="hidden",
+                text_overflow="ellipsis",
+                white_space="nowrap",
+            ),
+            rx.button(
+                "停止",
+                on_click=MessagesState.stop_sync,
+                variant="soft",
+                color_scheme="gray",
+                size="1",
+            ),
+            width="100%",
+            align="center",
+            spacing="2",
+            padding="0.5em 1em",
+            bg=ACCENT_SOFT,
+            border_bottom=f"1px solid {BORDER}",
         )
 
     @staticmethod
@@ -269,11 +338,7 @@ class MessagesPage:
                         item["status"] != "",
                         rx.badge(
                             item["status_label"],
-                            color_scheme=rx.match(
-                                item["status"],
-                                *cls.STATUS_COLORS.items(),
-                                "gray",
-                            ),
+                            color_scheme=color_by(item["status"], cls.STATUS_COLORS),
                             variant="soft",
                             size="1",
                             flex_shrink="0",

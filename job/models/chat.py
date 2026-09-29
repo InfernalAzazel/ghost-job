@@ -215,6 +215,14 @@ class ChatMessageRow(SQLModel, table=True):
             session.commit()
         return fresh
 
+    @classmethod
+    def boss_ids(cls) -> set[str]:
+        """库里有聊天记录的 HR。"""
+        from job.models import db_session
+
+        with db_session() as session:
+            return set(session.exec(select(cls.boss_id).distinct()).all())
+
     @property
     def local_time(self) -> datetime:
         return self.created_at.replace(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import random
+import re
 from datetime import datetime
 from functools import cached_property
 from itertools import takewhile
@@ -54,6 +55,8 @@ class Friend(BaseModel):
     name: str = ""
     company: str = Field(default="", validation_alias="brandName")
     job_id: str = Field(default="", validation_alias="encryptJobId")
+    # 调历史消息、岗位接口时要带上
+    security_id: str = Field(default="", validation_alias="securityId")
     last_from: str = Field(
         default="", validation_alias=AliasPath("lastMessageInfo", "fromId")
     )
@@ -188,7 +191,8 @@ class ChatResponder:
     """在单独的标签页守着 BOSS 聊天页，逐个回复 HR 发来的新消息。
 
     聊天页只打开一次，之后在页面里直接查询最近的会话，不再刷新页面。
-    流程：查询最近会话 → 找出等我回复的会话 → 打开会话读取岗位与消息 →
+    流程：查询最近会话 → 库里还没有的新会话（如刚投递的）读历史消息入库 →
+    找出等我回复的会话 → 打开会话读取岗位与消息 →
     新消息入库并打印 → HR 主动沟通的新岗位按投递规则判断后入库 → 按回复节奏等待 →
     AI 判断会话走向并生成回复 → 模拟打字发送；HR 已拒绝或我方婉拒的会话会被标记。
     """
@@ -214,6 +218,31 @@ class ChatResponder:
       return {code: detail.code, result: detail.zpData?.result || []};
     }
     """
+    # 一个会话的历史消息（从早到晚，最多翻 pages 页）；withBoss 时带上岗位接口 getBossData 的原始返回
+    HISTORY_JS = """
+    async ({bossId, securityId, pages, withBoss}) => {
+      let messages = [], maxMsgId = '0';
+      for (let i = 0; i < pages; i++) {
+        const q = new URLSearchParams({bossId, groupId: bossId, maxMsgId, c: '20', page: '1',
+          src: '0', securityId});
+        const r = await fetch('/wapi/zpchat/geek/historyMsg?' + q).then(r => r.json());
+        if (r.code !== 0) return {code: r.code};
+        const batch = r.zpData?.messages || [];
+        messages = batch.concat(messages);
+        if (!r.zpData?.hasMore || !batch.length) break;
+        maxMsgId = String(r.zpData.minMsgId);
+      }
+      if (!withBoss) return {code: 0, messages};
+      const q = new URLSearchParams({bossId, bossSource: '0', securityId});
+      const boss = await fetch('/wapi/zpchat/geek/getBossData?' + q).then(r => r.json());
+      return {code: 0, messages, boss};
+    }
+    """
+    # BOSS 表情在消息里是「[微笑]」这样的代码，聊天页显示成图片，入库时去掉
+    EMOJI = re.compile(r"\[[^\[\]\s]{1,6}\]")
+    RECALLED = "撤回了一条消息"
+    # 读新会话历史消息前的停顿（秒）
+    QUIET_GAP: ClassVar[tuple[float, float]] = (1, 3)
     # 会话列表项
     ITEM = ".friend-content"
     # 当前会话的消息
@@ -273,6 +302,8 @@ class ChatResponder:
         self._stop = asyncio.Event()
         # 已处理过的 HR 最后一条消息，失败也不再重复处理
         self._handled: set[str] = set()
+        # 已读过历史消息的新会话（没有可入库的消息时不再重复读）
+        self._seen: set[str] = set()
         self._replier: ChatReplier | None = None
         self._pace = ReplyPaceProfile()
         self._keywords = KeywordFilter()
@@ -300,6 +331,7 @@ class ChatResponder:
         self._stop.clear()
         # 重新开启时再检查一遍，上次停止前没回复完的会话不会被漏掉
         self._handled.clear()
+        self._seen.clear()
         self._replier = replier
         self._pace = pace or ReplyPaceProfile()
         self._keywords = keywords or KeywordFilter()
@@ -329,6 +361,7 @@ class ChatResponder:
                     if not await self._reopen(page):
                         return "need_login"
                     continue
+                await self._record_quiet(page, friends)
                 pending = [
                     f for f in friends if f.waiting and f.last_mid not in self._handled
                 ]
@@ -348,25 +381,26 @@ class ChatResponder:
 
     async def _reopen(self, page: Page) -> bool:
         """打开聊天页，网络异常时每隔一段时间重试，直到恢复或请求停止；需要登录时返回 False。"""
-        while (opened := await self._open_page(page)) is None:
+        while (opened := await self.open_page(page)) is None:
             await self._log(f"网络异常，打开聊天页失败，{self.RETRY} 秒后重试", "warn")
             await self._sleep(self.RETRY)
             if self._stop.is_set():
                 return True
         return opened
 
-    async def _open_page(self, page: Page) -> bool | None:
+    @classmethod
+    async def open_page(cls, page: Page) -> bool | None:
         """打开聊天页并等会话列表出现；需要登录时返回 False，网络异常返回 None。"""
         try:
-            await page.goto(self.CHAT_URL, wait_until="domcontentloaded")
+            await page.goto(cls.CHAT_URL, wait_until="domcontentloaded")
         except PlaywrightError as exc:
             log(f"打开聊天页失败：{exc!r}", "chat")
             return None
         try:
-            await page.wait_for_selector(self.ITEM, timeout=20_000)
+            await page.wait_for_selector(cls.ITEM, timeout=20_000)
         except PlaywrightTimeoutError:
             return not (
-                await page.locator(self.LOGIN).is_visible() or "login" in page.url
+                await page.locator(cls.LOGIN).is_visible() or "login" in page.url
             )
         return True
 
@@ -390,12 +424,79 @@ class ChatResponder:
         """会话详情列表 → Friend；缺 HR ID 或格式不对的跳过。"""
         return [f for f in _validate_all(Friend, items) if f.boss_id]
 
+    @classmethod
+    def parse_history(cls, items: Any, hr_uid: str) -> list[ChatMessage]:
+        """历史消息接口 → 聊天记录（从早到晚），与从聊天页读到的一致。
+
+        只要文字消息和 HR 索要简历等对话卡片；系统提示、职位卡片、附件简历卡片与撤回提示跳过。
+        """
+        messages = []
+        for item in items if isinstance(items, list) else []:
+            item = as_dict(item)
+            body = as_dict(item.get("body"))
+            if body.get("type") == 1 and body.get("templateId") == 1:
+                text = str(body.get("text") or "")
+            elif body.get("type") == 7:
+                text = str(as_dict(body.get("dialog")).get("text") or "")
+            else:
+                continue
+            text = cls.EMOJI.sub("", text).strip()
+            if not item.get("mid") or not text or text.endswith(cls.RECALLED):
+                continue
+            sender = str(as_dict(item.get("from")).get("uid") or "")
+            messages.append(
+                ChatMessage(mid=str(item["mid"]), from_hr=sender == hr_uid, text=text)
+            )
+        return sorted(messages, key=lambda m: int(m.mid) if m.mid.isdigit() else 0)
+
+    async def _record_quiet(self, page: Page, friends: list[Friend]) -> None:
+        """库里还没有、也不在等我回复的会话（如投递后 BOSS 替我发的打招呼），读历史消息入库。
+
+        不点开会话，只调历史消息接口；岗位按会话里的职位 ID 关联库里已有的岗位。
+        """
+        skip = ChatMessageRow.boss_ids() | self._seen
+        for friend in friends:
+            if friend.waiting or friend.boss_id in skip or self._stop.is_set():
+                continue
+            await self._sleep(random.uniform(*self.QUIET_GAP))
+            try:
+                data = as_dict(
+                    await asyncio.wait_for(
+                        page.evaluate(
+                            self.HISTORY_JS,
+                            {
+                                "bossId": friend.boss_id,
+                                "securityId": friend.security_id,
+                                "pages": 1,
+                                "withBoss": False,
+                            },
+                        ),
+                        30,
+                    )
+                )
+            except (PlaywrightError, TimeoutError) as exc:
+                log(f"读取 {friend.label} 的消息失败：{exc!r}", "chat")
+                continue
+            if data.get("code") != 0:
+                log(f"读取 {friend.label} 的消息失败：code={data.get('code')}", "chat")
+                continue
+            self._seen.add(friend.boss_id)
+            uid = (
+                friend.job_id
+                if friend.job_id and JobRow.get_dict(friend.job_id)
+                else ""
+            )
+            if self._record(
+                self.parse_history(data.get("messages"), friend.uid), friend, uid
+            ):
+                log(f"{friend.label} 的新会话已入库", "chat")
+
     async def _handle(self, page: Page, friend: Friend) -> None:
         """处理一位 HR 的新消息：读取入库 → 判断岗位 → 等待 → 回复。"""
         job = await self._open_chat(page, friend)
         if job is None:
             # 会话列表是虚拟滚动，找不到时重新打开聊天页再试一次
-            await self._open_page(page)
+            await self.open_page(page)
             job = await self._open_chat(page, friend)
         if job is None:
             await self._log(f"{friend.label}（打开会话失败，请手动查看）", "warn")
