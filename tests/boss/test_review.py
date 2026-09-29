@@ -59,7 +59,9 @@ def test_from_config_resume_match():
     assert reviewer.checks == ["简历技术匹配"]
     assert "简历技术匹配" in reviewer.instructions
     assert "岗位意图" not in reviewer.instructions
-    assert JobReviewer.from_config({"resume_match": True, "resume_text": ""}, LLM) is None
+    assert (
+        JobReviewer.from_config({"resume_match": True, "resume_text": ""}, LLM) is None
+    )
     assert JobReviewer.from_config({"resume_text": "Python"}, LLM) is None
 
 
@@ -86,7 +88,9 @@ def test_match_passes_and_prompt_has_requirement():
     prompts: list[str] = []
     reviewer, override = _reviewer_answering(True, "Agent 开发", prompts)
     with override:
-        assert asyncio.run(reviewer.check(JOB)) == Verdict(match=True, reason="Agent 开发")
+        assert asyncio.run(reviewer.check(JOB)) == Verdict(
+            match=True, reason="Agent 开发"
+        )
     assert "只投 Agent" in prompts[0] and "搭建 LLM 智能体" in prompts[0]
 
 
@@ -155,7 +159,9 @@ def test_provider_defaults_to_deepseek():
 
 
 def test_provider_uses_custom_base_url():
-    llm = LlmSettings(base_url=" http://localhost:11434/v1 ", api_key="k", model="qwen3")
+    llm = LlmSettings(
+        base_url=" http://localhost:11434/v1 ", api_key="k", model="qwen3"
+    )
     assert isinstance(llm.provider, OpenAIProvider)
     assert str(llm.provider.client.base_url) == "http://localhost:11434/v1/"
 

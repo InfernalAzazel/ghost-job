@@ -48,6 +48,27 @@ def test_record_keeps_brand_id_and_set_brand_id(tmp_db):
     assert JobRow.set_brand_id("missing", "b3") is False
 
 
+# TODO(v0.6.2): 随 JobRow.migrate_brand_id 一起删除
+def test_migrate_brand_id_adds_column_to_old_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import sqlite3
+
+    db = tmp_path / "old.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE job (uid VARCHAR PRIMARY KEY, title VARCHAR)")
+        conn.execute("INSERT INTO job (uid, title) VALUES ('1', '老岗位')")
+    monkeypatch.setattr(models_pkg, "DB_PATH", db)
+    monkeypatch.setattr(models_pkg, "DATA_DIR", tmp_path)
+    reset_engine()
+    try:
+        models_pkg.get_engine()
+        with sqlite3.connect(db) as conn:
+            assert conn.execute("SELECT brand_id FROM job").fetchone() == ("",)
+    finally:
+        reset_engine()
+
+
 def test_result_and_reason(tmp_db):
     JobRow.record(_job("a"), reason="技术栈吻合", applied=True)
     JobRow.record(_job("b"), suitable=False, reason="外包公司")
@@ -100,7 +121,11 @@ def test_set_verdict(tmp_db):
     JobRow.record(_job("a"), score=70, applied=True)
     assert JobRow.set_verdict("a", suitable=False, reason="外包公司", score=88)
     row = JobRow.get_dict("a")
-    assert (row["suitable"], row["reason"], row["matchStatus"]) == (False, "外包公司", "88 分")
+    assert (row["suitable"], row["reason"], row["matchStatus"]) == (
+        False,
+        "外包公司",
+        "88 分",
+    )
     assert JobRow.set_verdict("a", suitable=True, reason="Agent 方向", score=None)
     assert JobRow.get_dict("a")["matchStatus"] == "88 分"
     assert not JobRow.set_verdict("missing", suitable=True, reason="", score=None)
@@ -135,9 +160,19 @@ def test_to_json_exports_all_or_selected(tmp_db):
     assert count == 2
     assert set(data[0]) == set(JobRow.model_fields) | {"result"}
     a, b = ({j["uid"]: j for j in data}[k] for k in ("a", "b"))
-    assert (a["suitable"], a["applied"], a["match_score"], a["result"]) == (True, True, 88, "已投递")
+    assert (a["suitable"], a["applied"], a["match_score"], a["result"]) == (
+        True,
+        True,
+        88,
+        "已投递",
+    )
     assert a["reason"] == "技术栈吻合" and a["description"] == description
-    assert (b["suitable"], b["applied"], b["match_score"], b["result"]) == (False, False, None, "不合适")
+    assert (b["suitable"], b["applied"], b["match_score"], b["result"]) == (
+        False,
+        False,
+        None,
+        "不合适",
+    )
     assert datetime.fromisoformat(a["created_at"]).tzinfo is not None
 
     text, count = JobRow.to_json(["b"])

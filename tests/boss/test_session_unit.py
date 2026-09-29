@@ -28,8 +28,7 @@ def test_launch_error_profile_in_use_despite_chrome_path(tmp_path: Path):
     )
     msg = session._launch_error(exc)
     assert msg == (
-        f"Chrome profile 被占用：{tmp_path}，"
-        "请关闭其它使用该目录的 Chrome 后重试。"
+        f"Chrome profile 被占用：{tmp_path}，请关闭其它使用该目录的 Chrome 后重试。"
     )
     assert _INSTALL_HINT not in msg
 
@@ -78,7 +77,9 @@ def test_windows_skips_leftover_chrome(monkeypatch, tmp_path: Path):
     assert BossSession.chrome_executable() == system
 
 
-def test_windows_without_usable_chrome_falls_back_to_channel(monkeypatch, tmp_path: Path):
+def test_windows_without_usable_chrome_falls_back_to_channel(
+    monkeypatch, tmp_path: Path
+):
     monkeypatch.setattr("sys.platform", "win32")
     _install_chrome(tmp_path / "local", complete=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))

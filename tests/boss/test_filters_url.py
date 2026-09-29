@@ -68,9 +68,7 @@ def test_search_url_industry_codes():
         {"query": "ai", "industry": ["互联网", "人工智能", "未知"]}, "广州"
     )
     qs = parse_qs(urlparse(url).query)
-    assert qs["industry"] == [
-        f"{Industry.code('互联网')},{Industry.code('人工智能')}"
-    ]
+    assert qs["industry"] == [f"{Industry.code('互联网')},{Industry.code('人工智能')}"]
     assert Industry.code("互联网") == "100020"
 
 
@@ -83,7 +81,9 @@ def test_search_url_by_city_keeps_order():
 
 
 def test_search_url_by_city_defaults():
-    assert [city for city, _ in SearchUrl.by_city({"query": "ai"})] == list(Defaults.CITIES)
+    assert [city for city, _ in SearchUrl.by_city({"query": "ai"})] == list(
+        Defaults.CITIES
+    )
 
 
 def test_keyword_filter_rules():

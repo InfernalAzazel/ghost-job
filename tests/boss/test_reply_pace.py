@@ -38,7 +38,9 @@ def test_end_hour_must_be_after_start():
 
 
 def test_from_saved_custom_or_fallback():
-    assert ReplyPaceProfile.from_saved("fast", {"delay_min": 1}) == ReplyPaceProfile.preset("fast")
+    assert ReplyPaceProfile.from_saved(
+        "fast", {"delay_min": 1}
+    ) == ReplyPaceProfile.preset("fast")
     custom = ReplyPaceProfile.from_saved("custom", {"start_hour": 10, "end_hour": 18})
     assert (custom.start_hour, custom.end_hour) == (10, 18)
     assert ReplyPaceProfile.from_saved("custom", {"end_hour": 0}) == ReplyPaceProfile()

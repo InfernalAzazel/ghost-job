@@ -38,7 +38,12 @@ FRIEND = {
 }
 BOSS_DATA = {
     "zpData": {
-        "data": {"encryptJobId": "job-1", "name": "王女士", "title": "HR", "companyName": "示例科技有限公司"},
+        "data": {
+            "encryptJobId": "job-1",
+            "name": "王女士",
+            "title": "HR",
+            "companyName": "示例科技有限公司",
+        },
         "job": {
             "jobName": "AI 应用工程师",
             "salaryDesc": "20-30K",
@@ -82,7 +87,10 @@ def test_friend_tolerates_nulls():
 def test_job_from_boss_data():
     job = job_from_boss_data(BOSS_DATA)
     assert (job.job_id, job.title, job.company, job.salary) == (
-        "job-1", "AI 应用工程师", "示例科技", "20-30K"
+        "job-1",
+        "AI 应用工程师",
+        "示例科技",
+        "20-30K",
     )
     assert (job.location, job.experience, job.education) == ("广州", "3-5年", "本科")
     assert (job.hr_name, job.hr_title) == ("王女士", "HR")
@@ -90,7 +98,10 @@ def test_job_from_boss_data():
 
 
 def test_record_new_skips_known_messages(tmp_db):
-    first = [ChatMessage(mid="1", from_hr=False, text="您好"), ChatMessage(mid="2", from_hr=True, text="在吗")]
+    first = [
+        ChatMessage(mid="1", from_hr=False, text="您好"),
+        ChatMessage(mid="2", from_hr=True, text="在吗"),
+    ]
     kwargs = {"job_uid": "job-1", "boss_id": "boss-1", "hr_name": "王女士"}
     assert [m.mid for m in ChatMessageRow.record_new(first, **kwargs)] == ["1", "2"]
 
@@ -99,7 +110,9 @@ def test_record_new_skips_known_messages(tmp_db):
     assert [m.mid for m in fresh] == ["3"]
     history = ChatMessageRow.list_for_boss("boss-1")
     assert [(h["mid"], h["from_hr"], h["auto"]) for h in history] == [
-        ("1", False, False), ("2", True, False), ("3", False, True)
+        ("1", False, False),
+        ("2", True, False),
+        ("3", False, True),
     ]
 
 
@@ -115,53 +128,85 @@ def test_record_new_fills_empty_card_text(tmp_db):
 def test_record_new_replaces_temporary_mid_of_auto_reply(tmp_db):
     kwargs = {"job_uid": "job-1", "boss_id": "boss-1", "hr_name": "林女士"}
     hr = ChatMessage(mid="1", from_hr=True, text="发下简历")
-    ChatMessageRow.record_new([hr, ChatMessage(mid="temp", from_hr=False, text="简历已发您")], auto=True, **kwargs)
+    ChatMessageRow.record_new(
+        [hr, ChatMessage(mid="temp", from_hr=False, text="简历已发您")],
+        auto=True,
+        **kwargs,
+    )
 
-    fresh = ChatMessageRow.record_new([hr, ChatMessage(mid="2", from_hr=False, text="简历已发您")], **kwargs)
+    fresh = ChatMessageRow.record_new(
+        [hr, ChatMessage(mid="2", from_hr=False, text="简历已发您")], **kwargs
+    )
     assert [m.mid for m in fresh] == ["2"]
     history = ChatMessageRow.list_for_boss("boss-1")
     assert [(h["mid"], h["auto"]) for h in history] == [("1", False), ("2", True)]
 
 
 def test_conversations_join_job_and_filter(tmp_db):
-    JobRow.record(Job(job_id="job-1", title="AI 应用工程师", company="示例科技", hr_title="HR"))
-    ChatMessageRow.record_new(
-        [ChatMessage(mid="1", from_hr=True, text="您好")], job_uid="job-1", boss_id="boss-1", hr_name="王女士"
+    JobRow.record(
+        Job(job_id="job-1", title="AI 应用工程师", company="示例科技", hr_title="HR")
     )
     ChatMessageRow.record_new(
-        [ChatMessage(mid="2", from_hr=False, text="您好，简历已发")], job_uid="", boss_id="boss-2", hr_name="李先生"
+        [ChatMessage(mid="1", from_hr=True, text="您好")],
+        job_uid="job-1",
+        boss_id="boss-1",
+        hr_name="王女士",
+    )
+    ChatMessageRow.record_new(
+        [ChatMessage(mid="2", from_hr=False, text="您好，简历已发")],
+        job_uid="",
+        boss_id="boss-2",
+        hr_name="李先生",
     )
 
     items = ChatMessageRow.conversations()
     assert [i["boss_id"] for i in items] == ["boss-2", "boss-1"]
     first = items[1]
-    assert (first["company"], first["title"], first["hr_title"]) == ("示例科技", "AI 应用工程师", "HR")
+    assert (first["company"], first["title"], first["hr_title"]) == (
+        "示例科技",
+        "AI 应用工程师",
+        "HR",
+    )
     assert first["last_text"] == "您好" and first["last_from_hr"]
     assert items[0]["company"] == ""
     assert [i["boss_id"] for i in ChatMessageRow.conversations("示例")] == ["boss-1"]
 
 
 def test_replier_prompt_and_single_line_output():
-    replier = ChatReplier(prompt="语气礼貌", resume="Python 五年", llm=LlmSettings(api_key="k", model="m"))
+    replier = ChatReplier(
+        prompt="语气礼貌", resume="Python 五年", llm=LlmSettings(api_key="k", model="m")
+    )
     job = job_from_boss_data(BOSS_DATA)
-    history = [ChatMessage(mid="1", from_hr=False, text="您好"), ChatMessage(mid="2", from_hr=True, text="方便发简历吗")]
+    history = [
+        ChatMessage(mid="1", from_hr=False, text="您好"),
+        ChatMessage(mid="2", from_hr=True, text="方便发简历吗"),
+    ]
     prompt = replier.build_prompt(job, history, "合适（技术栈吻合）")
     assert "Python 五年" in prompt and "AI 应用工程师 · 示例科技 · 20-30K" in prompt
     assert "岗位判断：合适（技术栈吻合）" in prompt
     assert prompt.index("我：您好") < prompt.index("HR：方便发简历吗")
 
     def answer(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
-        out = {"outcome": "continue", "reply": "可以的，\n我马上发送附件简历。", "interview": True}
+        out = {
+            "outcome": "continue",
+            "reply": "可以的，\n我马上发送附件简历。",
+            "interview": True,
+        }
         return ModelResponse(parts=[TextPart(json.dumps(out, ensure_ascii=False))])
 
     with replier.agent.override(model=FunctionModel(answer)):
         decision = asyncio.run(replier.reply(job, history, ""))
-    assert decision == ChatDecision(outcome="continue", reply="可以的， 我马上发送附件简历。", interview=True)
+    assert decision == ChatDecision(
+        outcome="continue", reply="可以的， 我马上发送附件简历。", interview=True
+    )
 
 
 def test_status_mark_and_clear(tmp_db):
     ChatMessageRow.record_new(
-        [ChatMessage(mid="1", from_hr=True, text="不合适")], job_uid="", boss_id="boss-1", hr_name="王女士"
+        [ChatMessage(mid="1", from_hr=True, text="不合适")],
+        job_uid="",
+        boss_id="boss-1",
+        hr_name="王女士",
     )
     ChatStatusRow.mark("boss-1", "hr_rejected", text="不合适")
     assert ChatMessageRow.conversations()[0]["status_label"] == "HR 已拒绝"
@@ -192,37 +237,67 @@ def test_status_mark_and_clear(tmp_db):
 def test_status_follow_ai(tmp_db, before, outcome, interview, after):
     if before:
         ChatStatusRow.mark("boss-1", before)
-    changed = ChatStatusRow.follow_ai("boss-1", outcome=outcome, interview=interview, text="t")
+    changed = ChatStatusRow.follow_ai(
+        "boss-1", outcome=outcome, interview=interview, text="t"
+    )
     assert ChatStatusRow.statuses().get("boss-1", "") == after
     assert changed == (after if after != before else None)
 
 
 def test_conversations_filter_by_status(tmp_db):
-    for boss_id, name in (("boss-1", "王女士"), ("boss-2", "李先生"), ("boss-3", "赵女士"), ("boss-4", "钱先生")):
+    for boss_id, name in (
+        ("boss-1", "王女士"),
+        ("boss-2", "李先生"),
+        ("boss-3", "赵女士"),
+        ("boss-4", "钱先生"),
+    ):
         ChatMessageRow.record_new(
-            [ChatMessage(mid=boss_id, from_hr=True, text="您好")], job_uid="", boss_id=boss_id, hr_name=name
+            [ChatMessage(mid=boss_id, from_hr=True, text="您好")],
+            job_uid="",
+            boss_id=boss_id,
+            hr_name=name,
         )
     ChatStatusRow.mark("boss-1", "invited", source="auto")
     ChatStatusRow.mark("boss-2", "failed")
     ChatStatusRow.mark("boss-3", "hr_rejected")
 
     items = {i["boss_id"]: i for i in ChatMessageRow.conversations()}
-    assert (items["boss-1"]["status"], items["boss-1"]["status_label"]) == ("invited", "有面试")
-    assert [i["boss_id"] for i in ChatMessageRow.conversations(status="有面试")] == ["boss-1"]
-    assert {i["boss_id"] for i in ChatMessageRow.conversations(status="所有面试")} == {"boss-1", "boss-2"}
-    assert [i["boss_id"] for i in ChatMessageRow.conversations(status="无状态")] == ["boss-4"]
+    assert (items["boss-1"]["status"], items["boss-1"]["status_label"]) == (
+        "invited",
+        "有面试",
+    )
+    assert [i["boss_id"] for i in ChatMessageRow.conversations(status="有面试")] == [
+        "boss-1"
+    ]
+    assert {i["boss_id"] for i in ChatMessageRow.conversations(status="所有面试")} == {
+        "boss-1",
+        "boss-2",
+    }
+    assert [i["boss_id"] for i in ChatMessageRow.conversations(status="无状态")] == [
+        "boss-4"
+    ]
     assert len(ChatMessageRow.conversations(status="全部")) == 4
     assert ChatMessageRow.conversations("王", status="面试不通过") == []
 
 
 def test_export_json_all_or_selected(tmp_db):
-    JobRow.record(Job(job_id="job-1", title="AI 应用工程师", company="示例科技", salary="20-30K"))
-    ChatMessageRow.record_new(
-        [ChatMessage(mid="1", from_hr=True, text="您好"), ChatMessage(mid="2", from_hr=False, text="您好，在的")],
-        job_uid="job-1", boss_id="boss-1", hr_name="王女士",
+    JobRow.record(
+        Job(job_id="job-1", title="AI 应用工程师", company="示例科技", salary="20-30K")
     )
     ChatMessageRow.record_new(
-        [ChatMessage(mid="3", from_hr=True, text="考虑吗")], job_uid="", boss_id="boss-2", hr_name="李先生"
+        [
+            ChatMessage(mid="1", from_hr=True, text="您好"),
+            ChatMessage(mid="2", from_hr=False, text="您好，在的"),
+        ],
+        job_uid="job-1",
+        boss_id="boss-1",
+        hr_name="王女士",
+    )
+    ChatMessageRow.record_new(
+        [ChatMessage(mid="3", from_hr=True, text="考虑吗")],
+        job_uid="",
+        boss_id="boss-2",
+        hr_name="李先生",
     )
     ChatStatusRow.mark("boss-1", "invited")
 
@@ -233,9 +308,17 @@ def test_export_json_all_or_selected(tmp_db):
     text, count = ChatMessageRow.to_json(["boss-1"])
     (chat,) = json.loads(text)
     assert count == 1
-    assert (chat["hr_name"], chat["company"], chat["title"], chat["salary"]) == ("王女士", "示例科技", "AI 应用工程师", "20-30K")
+    assert (chat["hr_name"], chat["company"], chat["title"], chat["salary"]) == (
+        "王女士",
+        "示例科技",
+        "AI 应用工程师",
+        "20-30K",
+    )
     assert (chat["status"], chat["status_label"]) == ("invited", "有面试")
-    assert [(m["sender"], m["text"], m["auto"]) for m in chat["messages"]] == [("HR", "您好", False), ("我", "您好，在的", False)]
+    assert [(m["sender"], m["text"], m["auto"]) for m in chat["messages"]] == [
+        ("HR", "您好", False),
+        ("我", "您好，在的", False),
+    ]
     assert chat["messages"][0]["time"].startswith("20")
     assert "last_text" not in chat
 
@@ -266,20 +349,28 @@ def _responder(**kwargs) -> tuple[ChatResponder, list[tuple[str, str]]]:
 
 
 def test_new_job_from_hr_is_reviewed_and_recorded(tmp_db):
-    responder, logs = _responder(reviewer=FakeReviewer(Verdict(match=True, reason="方向吻合", score=85)))
+    responder, logs = _responder(
+        reviewer=FakeReviewer(Verdict(match=True, reason="方向吻合", score=85))
+    )
     job = job_from_boss_data(BOSS_DATA)
     verdict, job = asyncio.run(responder._judge(None, job, "job-1"))
 
     assert verdict == "合适（方向吻合）" and job.description == "负责大模型应用落地"
     row = JobRow.get_dict("job-1")
-    assert row["suitable"] and row["reason"] == "方向吻合" and row["matchStatus"] == "85 分"
+    assert (
+        row["suitable"]
+        and row["reason"] == "方向吻合"
+        and row["matchStatus"] == "85 分"
+    )
     assert row["result"] == "已沟通过"
     assert logs[-1][0] == "info" and "HR 主动沟通的新岗位" in logs[-1][1]
 
 
 def test_new_job_rejected_by_keywords(tmp_db):
     responder, logs = _responder(keywords=KeywordFilter(exclude_companies=["示例"]))
-    verdict, _job = asyncio.run(responder._judge(None, job_from_boss_data(BOSS_DATA), "job-1"))
+    verdict, _job = asyncio.run(
+        responder._judge(None, job_from_boss_data(BOSS_DATA), "job-1")
+    )
     assert verdict == "不合适（公司名含排除词）"
     assert not JobRow.get_dict("job-1")["suitable"]
     assert logs[-1][0] == "skip"
@@ -287,12 +378,19 @@ def test_new_job_rejected_by_keywords(tmp_db):
 
 def test_known_job_keeps_previous_verdict(tmp_db):
     JobRow.record(
-        Job(job_id="job-1", title="AI 应用工程师", company="示例科技", description="原描述"),
+        Job(
+            job_id="job-1",
+            title="AI 应用工程师",
+            company="示例科技",
+            description="原描述",
+        ),
         suitable=False,
         reason="外包公司",
     )
     responder, logs = _responder()
-    verdict, job = asyncio.run(responder._judge(None, job_from_boss_data(BOSS_DATA), "job-1"))
+    verdict, job = asyncio.run(
+        responder._judge(None, job_from_boss_data(BOSS_DATA), "job-1")
+    )
     assert verdict == "不合适（外包公司）" and job.description == "原描述"
     assert logs == []
 
@@ -305,7 +403,9 @@ def test_known_job_without_description_is_filled(tmp_db):
         applied=True,
     )
     responder, _logs = _responder()
-    verdict, job = asyncio.run(responder._judge(None, job_from_boss_data(BOSS_DATA), "job-1"))
+    verdict, job = asyncio.run(
+        responder._judge(None, job_from_boss_data(BOSS_DATA), "job-1")
+    )
     assert verdict == "合适（可投）" and job.description == "负责大模型应用落地"
     row = JobRow.get_dict("job-1")
     assert row["description"] == "负责大模型应用落地"
@@ -333,7 +433,10 @@ def _sending_responder(
         return resume_ok
 
     async def read(_page) -> list[ChatMessage]:
-        return [ChatMessage(mid=f"me-{i}", from_hr=False, text=t) for i, t in enumerate(sent)]
+        return [
+            ChatMessage(mid=f"me-{i}", from_hr=False, text=t)
+            for i, t in enumerate(sent)
+        ]
 
     responder._send = send  # type: ignore[method-assign]
     responder._accept_resume_request = accept_resume_request  # type: ignore[method-assign]
@@ -346,7 +449,9 @@ def test_hr_rejection_is_marked_without_reply(tmp_db):
     responder, logs, sent = _sending_responder()
     friend = Friend.model_validate(FRIEND)
     decision = ChatDecision(outcome="hr_rejected")
-    asyncio.run(responder._apply(None, friend, "job-1", decision, "暂时不符合我们的需求"))
+    asyncio.run(
+        responder._apply(None, friend, "job-1", decision, "暂时不符合我们的需求")
+    )
     assert sent == []
     assert ChatStatusRow.statuses() == {"boss-1": "hr_rejected"}
     assert logs[-1][0] == "skip" and "HR 已拒绝" in logs[-1][1]
@@ -375,7 +480,9 @@ def test_continue_reply_clears_mark(tmp_db):
 def test_resume_is_sent_after_reply_when_hr_asks(tmp_db):
     responder, logs, sent = _sending_responder()
     friend = Friend.model_validate(FRIEND)
-    decision = ChatDecision(outcome="continue", reply="好的，简历发您了", send_resume=True)
+    decision = ChatDecision(
+        outcome="continue", reply="好的，简历发您了", send_resume=True
+    )
     asyncio.run(responder._apply(None, friend, "job-1", decision, "方便发份简历吗"))
     assert sent == ["好的，简历发您了", "<简历>"]
     assert any(level == "reply" and "已发送附件简历" in text for level, text in logs)
@@ -385,9 +492,15 @@ def test_hr_resume_request_is_accepted_instead_of_sending(tmp_db):
     responder, logs, sent = _sending_responder(request_pending=True)
     friend = Friend.model_validate(FRIEND)
     decision = ChatDecision(outcome="continue", reply="好的，已同意", send_resume=True)
-    asyncio.run(responder._apply(None, friend, "job-1", decision, "我想要一份您的附件简历，您是否同意"))
+    asyncio.run(
+        responder._apply(
+            None, friend, "job-1", decision, "我想要一份您的附件简历，您是否同意"
+        )
+    )
     assert sent == ["好的，已同意", "<同意>"]
-    assert any(level == "reply" and "已同意 HR 的附件简历请求" in text for level, text in logs)
+    assert any(
+        level == "reply" and "已同意 HR 的附件简历请求" in text for level, text in logs
+    )
 
 
 def test_resume_failure_asks_for_manual_send(tmp_db):
@@ -402,8 +515,12 @@ def test_resume_failure_asks_for_manual_send(tmp_db):
 def test_interview_invitation_is_marked(tmp_db):
     responder, logs, _sent = _sending_responder()
     friend = Friend.model_validate(FRIEND)
-    decision = ChatDecision(outcome="continue", reply="好的，周三下午可以", interview=True)
-    asyncio.run(responder._apply(None, friend, "job-1", decision, "周三下午来面试可以吗"))
+    decision = ChatDecision(
+        outcome="continue", reply="好的，周三下午可以", interview=True
+    )
+    asyncio.run(
+        responder._apply(None, friend, "job-1", decision, "周三下午来面试可以吗")
+    )
     assert ChatStatusRow.statuses() == {"boss-1": "invited"}
     assert any(level == "info" and "已标记有面试" in text for level, text in logs)
 
@@ -413,7 +530,9 @@ def test_interview_detection_keeps_manual_status(tmp_db):
     responder, logs, _sent = _sending_responder()
     friend = Friend.model_validate(FRIEND)
     decision = ChatDecision(outcome="hr_rejected", interview=True)
-    asyncio.run(responder._apply(None, friend, "job-1", decision, "面试没通过，不好意思"))
+    asyncio.run(
+        responder._apply(None, friend, "job-1", decision, "面试没通过，不好意思")
+    )
     assert ChatStatusRow.statuses() == {"boss-1": "done"}
     assert not any("已标记有面试" in text for _level, text in logs)
 
@@ -421,7 +540,15 @@ def test_interview_detection_keeps_manual_status(tmp_db):
 def test_resume_not_sent_by_default(tmp_db):
     responder, _logs, sent = _sending_responder()
     friend = Friend.model_validate(FRIEND)
-    asyncio.run(responder._apply(None, friend, "job-1", ChatDecision(outcome="continue", reply="好的"), "你好"))
+    asyncio.run(
+        responder._apply(
+            None,
+            friend,
+            "job-1",
+            ChatDecision(outcome="continue", reply="好的"),
+            "你好",
+        )
+    )
     assert sent == ["好的"]
 
 
@@ -470,6 +597,8 @@ def test_reopen_stops_waiting_when_stopped():
 
 
 def test_parse_friends_skips_invalid():
-    friends = ChatResponder.parse_friends([FRIEND, {**FRIEND, "encryptBossId": ""}, {"uid": []}])
+    friends = ChatResponder.parse_friends(
+        [FRIEND, {**FRIEND, "encryptBossId": ""}, {"uid": []}]
+    )
     assert [f.boss_id for f in friends] == ["boss-1"]
     assert ChatResponder.parse_friends(None) == []
