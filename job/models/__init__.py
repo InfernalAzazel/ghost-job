@@ -41,10 +41,6 @@ def get_engine():
         connect_args={"check_same_thread": False},
     )
     SQLModel.metadata.create_all(_engine)
-    # TODO(v0.6.2): 过渡迁移，随 JobRow.migrate_brand_id 一起删除
-    from job.models.job import JobRow
-
-    JobRow.migrate_brand_id(_engine)
     return _engine
 
 

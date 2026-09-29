@@ -48,27 +48,6 @@ def test_record_keeps_brand_id_and_set_brand_id(tmp_db):
     assert JobRow.set_brand_id("missing", "b3") is False
 
 
-# TODO(v0.6.2): 随 JobRow.migrate_brand_id 一起删除
-def test_migrate_brand_id_adds_column_to_old_table(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    import sqlite3
-
-    db = tmp_path / "old.db"
-    with sqlite3.connect(db) as conn:
-        conn.execute("CREATE TABLE job (uid VARCHAR PRIMARY KEY, title VARCHAR)")
-        conn.execute("INSERT INTO job (uid, title) VALUES ('1', '老岗位')")
-    monkeypatch.setattr(models_pkg, "DB_PATH", db)
-    monkeypatch.setattr(models_pkg, "DATA_DIR", tmp_path)
-    reset_engine()
-    try:
-        models_pkg.get_engine()
-        with sqlite3.connect(db) as conn:
-            assert conn.execute("SELECT brand_id FROM job").fetchone() == ("",)
-    finally:
-        reset_engine()
-
-
 def test_result_and_reason(tmp_db):
     JobRow.record(_job("a"), reason="技术栈吻合", applied=True)
     JobRow.record(_job("b"), suitable=False, reason="外包公司")

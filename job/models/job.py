@@ -10,8 +10,6 @@ from sqlalchemy import or_
 from sqlmodel import Field, SQLModel, col, select
 
 if TYPE_CHECKING:
-    from sqlalchemy import Engine
-
     from job.boss.jobs import Job
 
 
@@ -344,21 +342,6 @@ class JobRow(SQLModel, table=True):
             session.add(row)
             session.commit()
             return True
-
-    # TODO(v0.6.2): 过渡迁移，v0.6.2 删除本方法、get_engine 里的调用和对应测试
-    @staticmethod
-    def migrate_brand_id(engine: Engine) -> None:
-        """v0.6.0 新增 brand_id 列：给 v0.5.x 升级上来的旧库补上，旧岗位留空，点「查企业」时按需补全。"""
-        from sqlalchemy import inspect
-        from sqlalchemy import text as sql
-
-        if "brand_id" not in {c["name"] for c in inspect(engine).get_columns("job")}:
-            with engine.begin() as conn:
-                conn.execute(
-                    sql(
-                        "ALTER TABLE job ADD COLUMN brand_id VARCHAR NOT NULL DEFAULT ''"
-                    )
-                )
 
     @classmethod
     def delete_by_uid(cls, uid: str) -> bool:
