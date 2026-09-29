@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import reflex as rx
 from reflex.vars import ObjectVar
 
 from job.ui.state.company import CompanyState
-from job.ui.theme import ACCENT, BORDER, MUTED, TEXT
+from job.ui.theme import ACCENT, BORDER, MUTED, TEXT, color_by
+
+if TYPE_CHECKING:
+    from reflex_components_radix.themes.base import LiteralAccentColor
 
 # 风险等级 → 标签颜色
-RISK_COLORS = {"low": "green", "medium": "orange", "high": "red"}
+RISK_COLORS: dict[str, LiteralAccentColor] = {
+    "low": "green",
+    "medium": "orange",
+    "high": "red",
+}
 
 
 def risk_badge(risk: rx.Var, label: rx.Var) -> rx.Component:
@@ -18,7 +27,7 @@ def risk_badge(risk: rx.Var, label: rx.Var) -> rx.Component:
         label != "",
         rx.badge(
             label,
-            color_scheme=rx.match(risk, *RISK_COLORS.items(), "gray"),
+            color_scheme=color_by(risk, RISK_COLORS),
             variant="soft",
             size="1",
             flex_shrink="0",
@@ -158,7 +167,7 @@ def company_dialog() -> rx.Component:
                 rx.cond(
                     CompanyState.has_report,
                     f"{report['name']} · 查询于 {report['checked_at']}",
-                    "工商信息来自 BOSS 公司主页，负面信息来自网上搜索，由 AI 综合评估",
+                    "汇总工商信息与网络口碑，AI 帮你识别欠薪、裁员、失信等风险",
                 ),
                 font_size="0.8em",
                 color=MUTED,

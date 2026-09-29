@@ -90,6 +90,35 @@ def test_search_runs_all_queries_and_dedupes():
     assert len(hits) == 3
 
 
+def test_search_drops_platform_template_pages():
+    name = "普宁恒达文化传媒有限公司"
+
+    def text(_query: str) -> list[dict[str, str]]:
+        return [
+            {
+                "title": f"{name} - 失信人名单 - 爱企查",
+                "href": "https://aiqicha.baidu.com/company_discredit_19092262656847",
+                "body": f"爱企查为您提供{name}2025年企业失信人信息查询,包括失信人立案日期、案号",
+            },
+            {
+                "title": f"{name} - 企查查",
+                "href": "https://www.qcc.com/firm/abc.html",
+                "body": f"{name}成立于2016年，法定代表人肖丽文，注册资本100万",
+            },
+            {
+                "title": f"{name}被执行人信息",
+                "href": "https://news.example.com/1",
+                "body": "（2025）粤5281执123号，执行标的5万元",
+            },
+        ]
+
+    hits = asyncio.run(CompanySearch(text=text).search(name))
+    assert [h.href for h in hits] == [
+        "https://www.qcc.com/firm/abc.html",
+        "https://news.example.com/1",
+    ]
+
+
 def test_search_all_failed_raises():
     def text(_query: str) -> list[dict[str, str]]:
         raise RuntimeError("网络不通")

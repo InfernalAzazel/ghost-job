@@ -55,7 +55,7 @@ class CompanyVerdict(BaseModel):
     risk: Literal["low", "medium", "high", "unknown"] = Field(
         description=(
             "low：没有与该公司相关的负面信息；medium：有少量或较早的劳动纠纷、差评；"
-            "high：欠薪、大规模裁员、失信被执行、诈骗或经营异常等严重问题；"
+            "high：欠薪、大规模裁员、有具体记录的失信被执行、诈骗或经营异常等严重问题；"
             "unknown：搜索结果几乎都与该公司无关，无法判断"
         )
     )
@@ -152,6 +152,12 @@ class CompanySearch:
     """
 
     QUERIES: ClassVar[tuple[str, ...]] = ("欠薪 裁员", "怎么样", "失信 被执行")
+    # 企业信息平台给每家公司都生成「失信人名单」「被执行人」等查询页，摘要是「为您提供……查询」，
+    # 不代表真有记录
+    PLATFORM = re.compile(
+        r"^https?://([\w-]+\.)*(aiqicha\.baidu|xin\.baidu|qcc|tianyancha|qixin|shuidi)\.(com|cn)/"
+    )
+    TEMPLATE = "为您提供"
     backend: str = "yandex"
     region: str = "cn-zh"
     max_results: int = 8
@@ -194,11 +200,15 @@ class CompanySearch:
                     body=str(item.get("body") or ""),
                     query=query,
                 )
-                if hit.href and hit.href not in hits:
+                if hit.href and hit.href not in hits and not self.is_template(hit):
                     hits[hit.href] = hit
         if failed == len(self.QUERIES):
             raise RuntimeError("网络搜索失败，请稍后重试")
         return list(hits.values())
+
+    @classmethod
+    def is_template(cls, hit: SearchHit) -> bool:
+        return bool(cls.PLATFORM.match(hit.href)) and cls.TEMPLATE in hit.body
 
 
 class CompanyReviewer(BaseModel):
@@ -208,6 +218,9 @@ class CompanyReviewer(BaseModel):
         "你是求职者的背景调查助手，评估这家公司是否值得去面试。"
         "搜索结果里常混有同名或名字相近的其他公司、与该公司无关的通用维权文章，"
         "只采信明确指向该公司（全称或简称与所在地、行业一致）的内容，其余忽略。"
+        "法院、执行信息公开网等查询入口，以及企业信息平台（爱企查、企查查、天眼查等）"
+        "标题里的「失信人名单」「被执行人」只是栏目名，不代表有记录；"
+        "只有写明案号、执行法院、执行金额等具体内容，才算失信被执行或被执行。"
         "结合工商信息判断：经营状态异常（吊销、注销、停业）、成立时间很短或注册资本极低也要提示。"
         "依据要具体，能对应到搜索结果的附上它的链接。"
     )
