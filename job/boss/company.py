@@ -231,6 +231,18 @@ class CompanyReviewer(BaseModel):
         )
 
 
+class Pages(Protocol):
+    async def brand_id(self, job_link: str) -> str: ...
+
+    async def business(self, brand_id: str) -> dict[str, str]: ...
+
+
+class Searcher(Protocol):
+    async def search(
+        self, name: str, on_step: Callable[[str], Awaitable[None]] | None = None
+    ) -> list[SearchHit]: ...
+
+
 class Reviewer(Protocol):
     async def review(
         self, name: str, full_name: str, info: dict[str, str], hits: list[SearchHit]
@@ -242,9 +254,7 @@ class CompanyChecker:
 
     NO_AI: ClassVar[str] = "未开通 AI 服务，只展示工商信息和搜索结果"
 
-    def __init__(
-        self, page: CompanyPage, search: CompanySearch, reviewer: Reviewer | None
-    ) -> None:
+    def __init__(self, page: Pages, search: Searcher, reviewer: Reviewer | None) -> None:
         self._page = page
         self._search = search
         self._reviewer = reviewer

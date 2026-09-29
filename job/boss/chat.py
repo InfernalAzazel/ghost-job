@@ -48,14 +48,14 @@ class Friend(BaseModel):
         coerce_numbers_to_str=True,
     )
 
-    boss_id: str = Field("", validation_alias="encryptBossId")
+    boss_id: str = Field(default="", validation_alias="encryptBossId")
     # HR 的数字 ID：最后一条消息的发送方是它，说明在等我回复
     uid: str = ""
     name: str = ""
-    company: str = Field("", validation_alias="brandName")
-    job_id: str = Field("", validation_alias="encryptJobId")
-    last_from: str = Field("", validation_alias=AliasPath("lastMessageInfo", "fromId"))
-    last_mid: str = Field("", validation_alias=AliasPath("lastMessageInfo", "msgId"))
+    company: str = Field(default="", validation_alias="brandName")
+    job_id: str = Field(default="", validation_alias="encryptJobId")
+    last_from: str = Field(default="", validation_alias=AliasPath("lastMessageInfo", "fromId"))
+    last_mid: str = Field(default="", validation_alias=AliasPath("lastMessageInfo", "msgId"))
 
     @field_validator("*", mode="before")
     @classmethod

@@ -77,19 +77,19 @@ class Job(BaseModel):
         coerce_numbers_to_str=True,
     )
 
-    job_id: str = Field("", validation_alias="encryptJobId")
-    title: str = Field("", validation_alias="jobName")
-    salary: str = Field("", validation_alias="salaryDesc")
-    company: str = Field("", validation_alias="brandName")
+    job_id: str = Field(default="", validation_alias="encryptJobId")
+    title: str = Field(default="", validation_alias="jobName")
+    salary: str = Field(default="", validation_alias="salaryDesc")
+    company: str = Field(default="", validation_alias="brandName")
     brand_id: str = Field(
-        "",
+        default="",
         validation_alias=AliasChoices(
             "encryptBrandId", _detail_path("brandComInfo", "encryptBrandId")
         ),
     )
     location: str = ""
-    experience: str = Field("", validation_alias="jobExperience")
-    education: str = Field("", validation_alias="jobDegree")
+    experience: str = Field(default="", validation_alias="jobExperience")
+    education: str = Field(default="", validation_alias="jobDegree")
     description: str = Field(
         default="",
         validation_alias=AliasChoices(
@@ -105,11 +105,11 @@ class Job(BaseModel):
         ),
     )
     hr_name: str = Field(
-        "",
+        default="",
         validation_alias=AliasChoices("bossName", _detail_path("bossInfo", "name")),
     )
     hr_title: str = Field(
-        "",
+        default="",
         validation_alias=AliasChoices("bossTitle", _detail_path("bossInfo", "title")),
     )
 
