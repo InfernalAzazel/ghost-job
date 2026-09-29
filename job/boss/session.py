@@ -15,6 +15,10 @@ from patchright.async_api import Error as PlaywrightError
 from job.utils import log
 
 
+class BrowserClosed(Exception):
+    """浏览器在运行中被关掉（手动关闭或崩溃）。"""
+
+
 class BossSession:
     """持久化 Chrome profile 的浏览器会话。"""
 
@@ -63,8 +67,15 @@ class BossSession:
     async def open(self) -> BrowserContext:
         """启动本机 Chrome；已打开则直接复用。"""
         if self._context is None:
+            # Chrome 被手动关掉或崩溃后还留着 Playwright，先清理再重新启动
+            await self.close()
             self._context = await self._launch()
+            self._context.on("close", self._on_closed)
         return self._context
+
+    def _on_closed(self, context: BrowserContext) -> None:
+        if self._context is context:
+            self._context = None
 
     async def page(self) -> Page:
         """复用第一个标签页，没有就新建。"""

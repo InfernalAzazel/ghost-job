@@ -88,6 +88,16 @@ def test_windows_without_usable_chrome_falls_back_to_channel(
     assert BossSession.chrome_executable() is None
 
 
+def test_closed_browser_is_not_reused(tmp_path: Path):
+    session = BossSession(user_data_dir=tmp_path)
+    context, stale = object(), object()
+    session._context = context  # type: ignore[assignment]
+    session._on_closed(stale)  # type: ignore[arg-type]
+    assert session.is_open
+    session._on_closed(context)  # type: ignore[arg-type]
+    assert not session.is_open
+
+
 def test_non_windows_uses_channel(monkeypatch):
     monkeypatch.setattr("sys.platform", "darwin")
     assert BossSession.chrome_executable() is None

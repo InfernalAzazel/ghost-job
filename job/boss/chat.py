@@ -27,6 +27,7 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 
 from job.boss.filters import BASE_URL, KeywordFilter, ReplyPaceProfile
 from job.boss.jobs import Job, LogSink, read_description
+from job.boss.session import BrowserClosed
 from job.models.chat import ChatMessage, ChatMessageRow, ChatStatusRow
 from job.models.job import JobRow
 from job.models.setting import LlmSettings
@@ -324,7 +325,7 @@ class ChatResponder:
         reviewer: JobReviewer | None = None,
         on_log: LogSink | None = None,
     ) -> str:
-        """一直守着聊天页直到请求停止；返回 stopped / need_login。
+        """一直守着聊天页直到请求停止；返回 stopped / need_login / closed（浏览器被关掉）。
 
         只在回复时段内回复；HR 主动沟通的新岗位按 ``keywords`` 与 ``reviewer`` 判断是否合适后入库。
         """
@@ -343,8 +344,9 @@ class ChatResponder:
         page = await context.new_page()
         try:
             log("打开聊天页", "chat")
-            if not await self._reopen(page):
+            if (opened := await self._reopen(page)) is None:
                 return "need_login"
+            page = opened
             low, high = self.POLL
             await self._log(
                 f"已打开聊天页，正在等待 HR 的新消息（每 {low / 60:g}–{high / 60:g} 分钟检查一次）"
@@ -358,8 +360,9 @@ class ChatResponder:
                     continue
                 friends = await self._recent_friends(page)
                 if friends is None:
-                    if not await self._reopen(page):
+                    if (opened := await self._reopen(page)) is None:
                         return "need_login"
+                    page = opened
                     continue
                 await self._record_quiet(page, friends)
                 pending = [
@@ -369,24 +372,40 @@ class ChatResponder:
                     # 最后一条是 HR 发的也可能只是系统消息（如发简历后的提示），打开后才确定
                     log(f"检查 {len(pending)} 个最后一条来自 HR 的会话", "chat")
                 for friend in pending:
-                    if self._stop.is_set():
+                    if self._stop.is_set() or page.is_closed():
                         break
                     self._handled.add(friend.last_mid)
                     await self._handle(page, friend)
+                    # 处理到一半聊天页被关掉：重新打开后再处理
+                    if page.is_closed():
+                        self._handled.discard(friend.last_mid)
                 await self._sleep(random.uniform(*self.POLL))
             return "stopped"
+        except BrowserClosed:
+            return "closed"
         finally:
             with contextlib.suppress(PlaywrightError):
                 await page.close()
 
-    async def _reopen(self, page: Page) -> bool:
-        """打开聊天页，网络异常时每隔一段时间重试，直到恢复或请求停止；需要登录时返回 False。"""
-        while (opened := await self.open_page(page)) is None:
+    async def _reopen(self, page: Page) -> Page | None:
+        """打开聊天页，网络异常时每隔一段时间重试，直到恢复或请求停止；需要登录时返回 None。
+
+        聊天页标签被关掉时另开一个；整个浏览器被关掉时抛出 ``BrowserClosed``。
+        返回之后使用的聊天页。
+        """
+        while True:
+            if page.is_closed():
+                if not self.session.is_open:
+                    raise BrowserClosed
+                await self._log("聊天页被关闭，已重新打开", "warn")
+                page = await (await self.session.open()).new_page()
+            opened = await self.open_page(page)
+            if opened is not None:
+                return page if opened else None
             await self._log(f"网络异常，打开聊天页失败，{self.RETRY} 秒后重试", "warn")
             await self._sleep(self.RETRY)
             if self._stop.is_set():
-                return True
-        return opened
+                return page
 
     @classmethod
     async def open_page(cls, page: Page) -> bool | None:

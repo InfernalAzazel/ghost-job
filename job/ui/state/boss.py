@@ -169,6 +169,10 @@ class BossState(rx.State):
             async with self:
                 if state == "need_login":
                     self._push_log("需要登录 BOSS，请在浏览器里登录后重新开始", "warn")
+                elif state == "closed":
+                    self._push_log(
+                        "浏览器已关闭，重新开启自动回复会自动打开浏览器", "warn"
+                    )
                 self._push_log(f"自动回复已停止：本次回复 {self.reply_count} 条")
                 self.reply_state = "需要登录" if state == "need_login" else "未开启"
                 self.reply_busy = False

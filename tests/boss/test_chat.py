@@ -21,6 +21,7 @@ from job.boss.chat import (
 from job.boss.filters import KeywordFilter
 from job.boss.jobs import Job
 from job.boss.review import Verdict
+from job.boss.session import BrowserClosed
 from job.models import init_db, reset_engine
 from job.models.chat import ChatMessage, ChatMessageRow, ChatStatusRow
 from job.models.job import JobRow
@@ -577,7 +578,8 @@ def test_reopen_retries_until_network_recovers():
 
     responder.open_page = open_page  # type: ignore[method-assign]
     responder._sleep = sleep  # type: ignore[method-assign]
-    assert asyncio.run(responder._reopen(None))
+    page = TabPage()
+    assert asyncio.run(responder._reopen(page)) is page  # type: ignore[arg-type]
     assert waits == [ChatResponder.RETRY] * 2
     assert [level for level, _text in logs] == ["warn", "warn"]
 
@@ -593,7 +595,63 @@ def test_reopen_stops_waiting_when_stopped():
 
     responder.open_page = open_page  # type: ignore[method-assign]
     responder._sleep = sleep  # type: ignore[method-assign]
-    assert asyncio.run(responder._reopen(None))
+    page = TabPage()
+    assert asyncio.run(responder._reopen(page)) is page  # type: ignore[arg-type]
+
+
+def test_reopen_need_login_returns_none():
+    responder, _logs = _responder()
+
+    async def open_page(_page) -> bool | None:
+        return False
+
+    responder.open_page = open_page  # type: ignore[method-assign]
+    assert asyncio.run(responder._reopen(TabPage())) is None  # type: ignore[arg-type]
+
+
+class TabPage:
+    def __init__(self, closed: bool = False) -> None:
+        self.closed = closed
+
+    def is_closed(self) -> bool:
+        return self.closed
+
+
+class TabSession:
+    def __init__(self, is_open: bool) -> None:
+        self.is_open = is_open
+        self.pages: list[TabPage] = []
+
+    async def open(self) -> TabSession:
+        return self
+
+    async def new_page(self) -> TabPage:
+        self.pages.append(TabPage())
+        return self.pages[-1]
+
+
+def test_reopen_replaces_closed_tab():
+    responder, logs = _responder()
+    session = TabSession(is_open=True)
+    responder.session = session  # type: ignore[assignment]
+    opened: list[TabPage] = []
+
+    async def open_page(page) -> bool | None:
+        opened.append(page)
+        return True
+
+    responder.open_page = open_page  # type: ignore[method-assign]
+    page = asyncio.run(responder._reopen(TabPage(closed=True)))  # type: ignore[arg-type]
+    assert page is session.pages[0]
+    assert opened == session.pages
+    assert logs == [("warn", "聊天页被关闭，已重新打开")]
+
+
+def test_reopen_raises_when_browser_closed():
+    responder, _logs = _responder()
+    responder.session = TabSession(is_open=False)  # type: ignore[assignment]
+    with pytest.raises(BrowserClosed):
+        asyncio.run(responder._reopen(TabPage(closed=True)))  # type: ignore[arg-type]
 
 
 def test_parse_friends_skips_invalid():
