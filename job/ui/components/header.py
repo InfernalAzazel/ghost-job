@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import reflex as rx
 
+from job import __version__
+from job.ui.state.update import UpdateState
 from job.ui.theme import ACCENT, MUTED, TEXT
 
 
@@ -39,7 +41,26 @@ def site_header(*, active: str) -> rx.Component:
             ),
             rx.vstack(
                 rx.text("Ghost Job", font_weight="700", font_size="1.05em", color=TEXT),
-                rx.text("智聘助手 · BOSS", font_size="0.75em", color=MUTED),
+                rx.hstack(
+                    rx.text(
+                        f"智聘助手 · BOSS · v{__version__}",
+                        font_size="0.75em",
+                        color=MUTED,
+                    ),
+                    rx.cond(
+                        UpdateState.latest != "",
+                        rx.badge(
+                            f"有新版本 v{UpdateState.latest}",
+                            color_scheme="orange",
+                            variant="soft",
+                            size="1",
+                            cursor="pointer",
+                            on_click=UpdateState.open_release,
+                        ),
+                    ),
+                    spacing="2",
+                    align="center",
+                ),
                 spacing="0",
                 align="start",
             ),
@@ -58,4 +79,5 @@ def site_header(*, active: str) -> rx.Component:
         width="100%",
         align="center",
         padding_y="0.75em",
+        on_mount=UpdateState.check,
     )

@@ -59,6 +59,7 @@
 - **查企业**：一键读取公司的工商信息，上网搜索欠薪、裁员、失信等负面信息，AI 给出低 / 中 / 高风险评估和依据，风险标签直接显示在岗位和会话列表里
 - **数据导出**：岗位和聊天记录都能一键导出为 JSON，方便整理、复盘或交给其他工具处理
 - **数据只在本机**：岗位记录、简历、API Key 全部保存在你自己的电脑上
+- **新版本提醒**：顶部显示当前版本号，有新版本时旁边出现提示，点击直接打开下载页
 
 ## 快速开始
 
@@ -317,7 +318,7 @@ uv run python -m job        # 桌面窗口 + 热重载
 uv run pytest -q            # 运行测试
 ```
 
-推送 `v*` 标签后，GitHub Actions 会自动打包 Windows / macOS / Linux 安装包并发布到 Releases。
+版本号只写在 `job/__init__.py` 的 `__version__`，`pyproject.toml` 从这里读取。推送 `v*` 标签后，GitHub Actions 会自动打包 Windows / macOS / Linux 安装包并发布到 Releases。
 
 ### 提交 PR 的规则
 
