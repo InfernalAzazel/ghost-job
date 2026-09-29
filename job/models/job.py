@@ -10,8 +10,6 @@ from sqlalchemy import or_
 from sqlmodel import Field, SQLModel, col, select
 
 if TYPE_CHECKING:
-    from sqlalchemy import Engine
-
     from job.boss.jobs import Job
 
 
@@ -327,17 +325,6 @@ class JobRow(SQLModel, table=True):
             session.add(row)
             session.commit()
             return True
-
-    @staticmethod
-    def migrate(engine: Engine) -> None:
-        """旧库的 job 表补上后来新增的列。"""
-        from sqlalchemy import inspect
-        from sqlalchemy import text as sql
-
-        columns = {c["name"] for c in inspect(engine).get_columns("job")}
-        if "brand_id" not in columns:
-            with engine.begin() as conn:
-                conn.execute(sql("ALTER TABLE job ADD COLUMN brand_id VARCHAR NOT NULL DEFAULT ''"))
 
     @classmethod
     def delete_by_uid(cls, uid: str) -> bool:

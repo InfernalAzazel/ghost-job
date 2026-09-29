@@ -240,28 +240,6 @@ def test_export_json_all_or_selected(tmp_db):
     assert "last_text" not in chat
 
 
-def test_legacy_tags_are_migrated(tmp_path, monkeypatch):
-    import sqlite3
-
-    db = tmp_path / "test.db"
-    with sqlite3.connect(db) as conn:
-        conn.execute("create table chat_rejection (boss_id text primary key, by text, text text, created_at text)")
-        conn.execute("insert into chat_rejection values ('boss-1', 'hr', '不合适', '2026-09-28 06:00:00')")
-        conn.execute("insert into chat_rejection values ('boss-2', 'me', '暂不考虑', '2026-09-28 06:00:00')")
-        conn.execute("create table chat_interview (boss_id text primary key, status text, source text, updated_at text)")
-        conn.execute("insert into chat_interview values ('boss-3', 'done', 'manual', '2026-09-28 06:00:00')")
-    monkeypatch.setattr(models_pkg, "DB_PATH", db)
-    monkeypatch.setattr(models_pkg, "DATA_DIR", tmp_path)
-    reset_engine()
-    try:
-        assert ChatStatusRow.statuses() == {"boss-1": "hr_rejected", "boss-2": "declined", "boss-3": "done"}
-        with sqlite3.connect(db) as conn:
-            tables = {r[0] for r in conn.execute("select name from sqlite_master where type='table'")}
-        assert not tables & {"chat_rejection", "chat_interview"}
-    finally:
-        reset_engine()
-
-
 class FakeReviewer:
     def __init__(self, verdict: Verdict) -> None:
         self.verdict = verdict

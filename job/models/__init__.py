@@ -41,11 +41,6 @@ def get_engine():
         connect_args={"check_same_thread": False},
     )
     SQLModel.metadata.create_all(_engine)
-    from job.models.chat import ChatStatusRow
-    from job.models.job import JobRow
-
-    JobRow.migrate(_engine)
-    ChatStatusRow.migrate_legacy(_engine)
     return _engine
 
 

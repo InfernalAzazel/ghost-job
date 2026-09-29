@@ -5,15 +5,10 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 from pydantic import BaseModel
-from sqlalchemy import inspect
-from sqlalchemy import text as sql
 from sqlmodel import Field, SQLModel, col, select
-
-if TYPE_CHECKING:
-    from sqlalchemy import Engine
 
 
 def _now() -> datetime:
@@ -125,29 +120,6 @@ class ChatStatusRow(SQLModel, table=True):
         if wanted == "所有面试":
             return status in cls.INTERVIEWS
         return cls.LABELS.get(status) == wanted
-
-    @staticmethod
-    def migrate_legacy(engine: Engine) -> None:
-        """把旧版的拒绝表 chat_rejection、面试表 chat_interview 并入本表后删除。"""
-        with engine.begin() as conn:
-            tables = set(inspect(conn).get_table_names())
-            if "chat_interview" in tables:
-                conn.execute(
-                    sql(
-                        "INSERT OR IGNORE INTO chat_status (boss_id, status, source, text, updated_at)"
-                        " SELECT boss_id, status, source, '', updated_at FROM chat_interview"
-                    )
-                )
-                conn.execute(sql("DROP TABLE chat_interview"))
-            if "chat_rejection" in tables:
-                conn.execute(
-                    sql(
-                        "INSERT OR IGNORE INTO chat_status (boss_id, status, source, text, updated_at)"
-                        " SELECT boss_id, CASE by WHEN 'hr' THEN 'hr_rejected' ELSE 'declined' END,"
-                        " 'auto', text, created_at FROM chat_rejection"
-                    )
-                )
-                conn.execute(sql("DROP TABLE chat_rejection"))
 
 
 class ChatMessageRow(SQLModel, table=True):

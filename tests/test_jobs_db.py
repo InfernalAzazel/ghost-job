@@ -44,25 +44,8 @@ def test_record_keeps_brand_id_and_set_brand_id(tmp_db):
     JobRow.record(_job("1", brand_id="b1"))
     assert JobRow.record(_job("1")).brand_id == "b1"
     assert JobRow.set_brand_id("1", "b2") is True
-    with db_session() as session:
-        assert session.get(JobRow, "1").brand_id == "b2"
+    assert JobRow.get_dict("1")["brandId"] == "b2"
     assert JobRow.set_brand_id("missing", "b3") is False
-
-
-def test_migrate_adds_brand_id_to_old_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    import sqlite3
-
-    db = tmp_path / "old.db"
-    with sqlite3.connect(db) as conn:
-        conn.execute("CREATE TABLE job (uid VARCHAR PRIMARY KEY, title VARCHAR)")
-        conn.execute("INSERT INTO job (uid, title) VALUES ('1', '老岗位')")
-    monkeypatch.setattr(models_pkg, "DB_PATH", db)
-    monkeypatch.setattr(models_pkg, "DATA_DIR", tmp_path)
-    reset_engine()
-    models_pkg.get_engine()
-    with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT brand_id FROM job").fetchone() == ("",)
-    reset_engine()
 
 
 def test_result_and_reason(tmp_db):
