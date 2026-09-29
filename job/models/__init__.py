@@ -26,7 +26,13 @@ def get_engine():
     if _engine is not None:
         return _engine
 
-    for mod in ("job.models.job", "job.models.search", "job.models.setting", "job.models.chat"):
+    for mod in (
+        "job.models.job",
+        "job.models.search",
+        "job.models.setting",
+        "job.models.chat",
+        "job.models.company",
+    ):
         importlib.import_module(mod)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -36,7 +42,9 @@ def get_engine():
     )
     SQLModel.metadata.create_all(_engine)
     from job.models.chat import ChatStatusRow
+    from job.models.job import JobRow
 
+    JobRow.migrate(_engine)
     ChatStatusRow.migrate_legacy(_engine)
     return _engine
 

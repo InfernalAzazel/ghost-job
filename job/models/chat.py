@@ -251,7 +251,10 @@ class ChatMessageRow(SQLModel, table=True):
                     select(JobRow).where(col(JobRow.uid).in_(set(job_uids.values())))
                 ).all()
             }
+        from job.models.company import CompanyRow
+
         statuses = ChatStatusRow.statuses()
+        risks = CompanyRow.risks(j.brand_id for j in jobs.values())
         today = datetime.now().astimezone().date()
         items = []
         for boss_id, last in sorted(latest.items(), key=lambda kv: kv[1].created_at, reverse=True):
@@ -259,6 +262,7 @@ class ChatMessageRow(SQLModel, table=True):
             if not ChatStatusRow.matches(current, status):
                 continue
             job = jobs.get(job_uids.get(boss_id, ""))
+            risk = risks.get(job.brand_id, "") if job else ""
             when = last.local_time
             item = {
                 "boss_id": boss_id,
@@ -275,6 +279,8 @@ class ChatMessageRow(SQLModel, table=True):
                 "last_time": when.strftime("%H:%M" if when.date() == today else "%m-%d"),
                 "status": current,
                 "status_label": ChatStatusRow.LABELS.get(current, ""),
+                "risk": risk,
+                "risk_label": CompanyRow.RISK_LABELS.get(risk, ""),
             }
             q = search.strip()
             if q and not any(q in item[k] for k in ("hr_name", "company", "title")):

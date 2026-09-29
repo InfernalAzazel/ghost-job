@@ -31,6 +31,14 @@ def test_parse_list_item_by_alias():
     assert job.description == ""
 
 
+def test_parse_brand_id_from_list_and_detail():
+    assert Job.model_validate({**LIST_ITEM, "encryptBrandId": "b1~"}).brand_id == "b1~"
+    job = Job.model_validate(LIST_ITEM).with_detail(
+        {"zpData": {"brandComInfo": {"encryptBrandId": "b2_x"}}}
+    )
+    assert job.brand_id == "b2_x"
+
+
 def test_parse_list_item_drops_encrypted_salary():
     job = Job.model_validate({**LIST_ITEM, "salaryDesc": "\ue031-\ue032K"})
     assert job.salary == ""

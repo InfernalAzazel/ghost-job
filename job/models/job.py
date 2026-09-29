@@ -10,6 +10,8 @@ from sqlalchemy import or_
 from sqlmodel import Field, SQLModel, col, select
 
 if TYPE_CHECKING:
+    from sqlalchemy import Engine
+
     from job.boss.jobs import Job
 
 
@@ -45,6 +47,7 @@ class JobRow(SQLModel, table=True):
     title: str = ""
     salary: str = ""
     company: str = ""
+    brand_id: str = Field(default="", description="BOSS 公司 ID，公司主页 /gongsi/{brand_id}.html")
     location: str = ""
     experience: str = ""
     education: str = ""
@@ -77,6 +80,7 @@ class JobRow(SQLModel, table=True):
             "title": self.title,
             "salary": self.salary,
             "company": self.company,
+            "brandId": self.brand_id,
             "location": self.location,
             "link": self.link,
             "hrName": self.hr_name,
@@ -122,6 +126,7 @@ class JobRow(SQLModel, table=True):
         with db_session() as session:
             if existing := session.get(cls, row.uid):
                 row.created_at = existing.created_at
+                row.brand_id = row.brand_id or existing.brand_id
                 if score is None:
                     row.match_score = existing.match_score
             merged = session.merge(row)
@@ -211,7 +216,18 @@ class JobRow(SQLModel, table=True):
             stmt = select(cls).order_by(col(cls.created_at).desc())
             stmt = cls._apply_filters(stmt, search, analysis, suitable, uid)
             rows = session.exec(stmt.offset(offset).limit(limit)).all()
-        return [r.to_dict() for r in rows]
+        return cls._with_risk([r.to_dict() for r in rows])
+
+    @staticmethod
+    def _with_risk(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """补上公司查询得到的风险等级 risk / riskLabel（没查过为空）。"""
+        from job.models.company import CompanyRow
+
+        risks = CompanyRow.risks(i["brandId"] for i in items)
+        for item in items:
+            risk = risks.get(item["brandId"], "")
+            item["risk"], item["riskLabel"] = risk, CompanyRow.RISK_LABELS.get(risk, "")
+        return items
 
     @classmethod
     def to_json(cls, uids: list[str] | None = None) -> tuple[str, int]:
@@ -242,7 +258,7 @@ class JobRow(SQLModel, table=True):
 
         with db_session() as session:
             row = session.get(cls, uid)
-            return None if row is None else row.to_dict()
+        return None if row is None else cls._with_risk([row.to_dict()])[0]
 
     @classmethod
     def count_today(cls) -> int:
@@ -297,6 +313,31 @@ class JobRow(SQLModel, table=True):
             session.add(row)
             session.commit()
             return True
+
+    @classmethod
+    def set_brand_id(cls, uid: str, brand_id: str) -> bool:
+        """补写公司 ID，其余字段不变；岗位不存在返回 False。"""
+        from job.models import db_session
+
+        with db_session() as session:
+            row = session.get(cls, uid)
+            if row is None:
+                return False
+            row.brand_id = brand_id
+            session.add(row)
+            session.commit()
+            return True
+
+    @staticmethod
+    def migrate(engine: Engine) -> None:
+        """旧库的 job 表补上后来新增的列。"""
+        from sqlalchemy import inspect
+        from sqlalchemy import text as sql
+
+        columns = {c["name"] for c in inspect(engine).get_columns("job")}
+        if "brand_id" not in columns:
+            with engine.begin() as conn:
+                conn.execute(sql("ALTER TABLE job ADD COLUMN brand_id VARCHAR NOT NULL DEFAULT ''"))
 
     @classmethod
     def delete_by_uid(cls, uid: str) -> bool:

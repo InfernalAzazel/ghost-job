@@ -81,6 +81,12 @@ class Job(BaseModel):
     title: str = Field("", validation_alias="jobName")
     salary: str = Field("", validation_alias="salaryDesc")
     company: str = Field("", validation_alias="brandName")
+    brand_id: str = Field(
+        "",
+        validation_alias=AliasChoices(
+            "encryptBrandId", _detail_path("brandComInfo", "encryptBrandId")
+        ),
+    )
     location: str = ""
     experience: str = Field("", validation_alias="jobExperience")
     education: str = Field("", validation_alias="jobDegree")
@@ -136,9 +142,9 @@ class Job(BaseModel):
         return "" if _ENCRYPTED.search(value) else value
 
     def with_detail(self, payload: dict[str, Any]) -> Job:
-        """用详情接口的非空字段（描述、地址、HR）补全当前职位。"""
+        """用详情接口的非空字段（描述、地址、HR、公司 ID）补全当前职位。"""
         detail = Job.model_validate(payload)
-        fields = ("description", "address", "hr_name", "hr_title")
+        fields = ("description", "address", "hr_name", "hr_title", "brand_id")
         return self.model_copy(
             update={k: v for k in fields if (v := getattr(detail, k))}
         )

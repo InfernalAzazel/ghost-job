@@ -7,6 +7,7 @@ license = "PolyForm-Noncommercial-1.0.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
+    "ddgs>=9.16.0",
     "patchright>=1.63.0",
     "pydantic>=2.0",
     "pydantic-ai-slim[openai]>=2.49.0",

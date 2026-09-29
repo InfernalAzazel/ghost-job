@@ -93,6 +93,7 @@ def job_from_boss_data(payload: dict[str, Any]) -> Job:
             "title": job.get("jobName"),
             "salary": job.get("salaryDesc"),
             "company": job.get("brandName") or data.get("companyName"),
+            "brand_id": job.get("encryptBrandId") or data.get("encryptBrandId"),
             "location": job.get("locationName"),
             "experience": job.get("experienceName"),
             "education": job.get("degreeName"),
