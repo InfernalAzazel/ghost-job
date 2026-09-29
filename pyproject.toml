@@ -15,6 +15,7 @@ dependencies = [
     "pyquery>=2.1.0",
     "reflex>=0.9.12",
     "reflex-desktop>=0.1.0",
+    "reportlab>=5.0.1",
     "sqlmodel>=0.0.47",
 ]
 

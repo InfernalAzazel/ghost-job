@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 import webbrowser
+from pathlib import Path
 
 import reflex as rx
 from patchright.async_api import Error as PlaywrightError
@@ -10,10 +12,12 @@ from pydantic_ai.exceptions import AgentRunError
 from sqlalchemy.exc import SQLAlchemyError
 
 from job.boss.company import CompanyChecker, CompanyPage, CompanyReviewer, CompanySearch
+from job.boss.company_report import company_pdf
 from job.models.company import CompanyRow
 from job.models.job import JobRow
 from job.models.setting import LlmSettings
 from job.ui.state.boss import _session
+from job.ui.state.export import BROWSER_DOWNLOAD, save_dialog_script
 from job.ui.state.jobs import JobsState
 from job.ui.state.messages import MessagesState
 
@@ -55,6 +59,29 @@ class CompanyState(rx.State):
     @rx.event
     def open_link(self, url: str) -> None:
         webbrowser.open(url)
+
+    def _pdf_name(self) -> str:
+        name = self.report.get("full_name") or self.report.get("name") or "企业"
+        return re.sub(r'[\\/:*?"<>|]', "_", f"{name}-企业报告.pdf")
+
+    @rx.event
+    def download_report(self):
+        script = save_dialog_script(self._pdf_name(), "PDF", "pdf")
+        return rx.call_script(script, callback=CompanyState.save_report)
+
+    @rx.event
+    def save_report(self, path: str | None):
+        """把报告 PDF 写到保存框选中的路径；取消时 ``path`` 为空。"""
+        if not path or not self.report:
+            return None
+        data = company_pdf(self.report)
+        if path == BROWSER_DOWNLOAD:
+            return rx.download(data=data, filename=self._pdf_name())
+        try:
+            Path(path).write_bytes(data)
+        except OSError as exc:
+            return rx.toast.error(f"下载失败：{exc.strerror or exc}")
+        return rx.toast.success(f"报告已保存到 {path}")
 
     @rx.event(background=True)
     async def check(self):

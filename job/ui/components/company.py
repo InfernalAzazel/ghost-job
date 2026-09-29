@@ -205,6 +205,16 @@ def company_dialog() -> rx.Component:
             ),
             rx.hstack(
                 rx.spacer(),
+                rx.cond(
+                    CompanyState.has_report,
+                    rx.button(
+                        rx.icon("download", size=14),
+                        "下载报告",
+                        variant="soft",
+                        disabled=CompanyState.busy,
+                        on_click=CompanyState.download_report,
+                    ),
+                ),
                 rx.button(
                     rx.icon("refresh-cw", size=14),
                     "重新查询",
