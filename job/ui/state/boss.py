@@ -53,7 +53,7 @@ class BossState(rx.State):
     reply_skip_count: int = 0
     # 运行日志（新的在前）：{time, level, text}
     # level 为 info / ok 投递 / dup 重复 / skip 跳过 / warn / recv 收到消息 / reply 已回复
-    log: list[dict[str, str]] = rx.field(default_factory=list)
+    log: rx.Field[list[dict[str, str]]] = rx.field(default_factory=list)
     stored_count: int = 0
     session_count: int = 0
     # 本次投递中遇到的重复岗位数与跳过岗位数
