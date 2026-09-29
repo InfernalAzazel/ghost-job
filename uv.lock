@@ -229,7 +229,6 @@ wheels = [
 
 [[package]]
 name = "ghost-job"
-version = "0.6.2"
 source = { editable = "." }
 dependencies = [
     { name = "ddgs" },

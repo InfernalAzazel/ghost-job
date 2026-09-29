@@ -1,6 +1,6 @@
 [project]
 name = "ghost-job"
-version = "0.6.2"
+dynamic = ["version"]
 description = "Ghost Job — Reflex UI + Patchright BOSS scraper"
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -21,6 +21,9 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "job/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["job"]
