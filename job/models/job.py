@@ -21,7 +21,11 @@ def _now() -> datetime:
 
 def _local_iso(value: datetime) -> str:
     """库里的 UTC 时间 → 带时区的本地时间文本。"""
-    return value.replace(tzinfo=value.tzinfo or UTC).astimezone().isoformat(timespec="seconds")
+    return (
+        value.replace(tzinfo=value.tzinfo or UTC)
+        .astimezone()
+        .isoformat(timespec="seconds")
+    )
 
 
 class JobRow(SQLModel, table=True):
@@ -47,7 +51,9 @@ class JobRow(SQLModel, table=True):
     title: str = ""
     salary: str = ""
     company: str = ""
-    brand_id: str = Field(default="", description="BOSS 公司 ID，公司主页 /gongsi/{brand_id}.html")
+    brand_id: str = Field(
+        default="", description="BOSS 公司 ID，公司主页 /gongsi/{brand_id}.html"
+    )
     location: str = ""
     experience: str = ""
     education: str = ""
@@ -61,8 +67,12 @@ class JobRow(SQLModel, table=True):
     suitable: bool = Field(default=True, description="是否合适")
     applied: bool = Field(default=False, description="是否已投递（点过「立即沟通」）")
     reason: str = Field(default="", description="合适或不合适的原因，如「外包公司」")
-    created_at: datetime = Field(default_factory=_now, index=True, description="首次入库时间（UTC）")
-    updated_at: datetime = Field(default_factory=_now, description="最后更新时间（UTC）")
+    created_at: datetime = Field(
+        default_factory=_now, index=True, description="首次入库时间（UTC）"
+    )
+    updated_at: datetime = Field(
+        default_factory=_now, description="最后更新时间（UTC）"
+    )
 
     @property
     def result(self) -> str:
@@ -150,7 +160,9 @@ class JobRow(SQLModel, table=True):
             return session.exec(stmt.limit(1)).first()
 
     @classmethod
-    def _apply_filters(cls, stmt, search: str, analysis: str, suitable: str, uid: str = ""):
+    def _apply_filters(
+        cls, stmt, search: str, analysis: str, suitable: str, uid: str = ""
+    ):
         """按岗位名 / 公司模糊搜，并按分析状态、是否合适筛选；给了 ``uid`` 只看这一个岗位。"""
         if uid:
             stmt = stmt.where(col(cls.uid) == uid)
@@ -244,7 +256,10 @@ class JobRow(SQLModel, table=True):
             rows = session.exec(stmt).all()
         items = [
             {
-                **{k: _local_iso(v) if isinstance(v, datetime) else v for k, v in row.model_dump().items()},
+                **{
+                    k: _local_iso(v) if isinstance(v, datetime) else v
+                    for k, v in row.model_dump().items()
+                },
                 "result": row.result,
             }
             for row in rows
@@ -267,8 +282,10 @@ class JobRow(SQLModel, table=True):
 
         from job.models import db_session
 
-        midnight = datetime.now().astimezone().replace(
-            hour=0, minute=0, second=0, microsecond=0
+        midnight = (
+            datetime.now()
+            .astimezone()
+            .replace(hour=0, minute=0, second=0, microsecond=0)
         )
         since = midnight.astimezone(UTC)
         stmt = (
@@ -337,7 +354,11 @@ class JobRow(SQLModel, table=True):
 
         if "brand_id" not in {c["name"] for c in inspect(engine).get_columns("job")}:
             with engine.begin() as conn:
-                conn.execute(sql("ALTER TABLE job ADD COLUMN brand_id VARCHAR NOT NULL DEFAULT ''"))
+                conn.execute(
+                    sql(
+                        "ALTER TABLE job ADD COLUMN brand_id VARCHAR NOT NULL DEFAULT ''"
+                    )
+                )
 
     @classmethod
     def delete_by_uid(cls, uid: str) -> bool:

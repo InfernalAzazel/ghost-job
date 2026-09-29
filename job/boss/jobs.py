@@ -43,7 +43,9 @@ _ENCRYPTED = re.compile(r"[\ue000-\uf8ff]")
 DESCRIPTION = ".job-sec-text"
 
 
-async def read_description(context: BrowserContext, link: str, *, attempts: int = 3) -> str:
+async def read_description(
+    context: BrowserContext, link: str, *, attempts: int = 3
+) -> str:
     """在新标签页打开职位详情页读职位描述，读不到隔几秒重试；都失败返回空串。"""
     for attempt in range(attempts):
         if attempt:

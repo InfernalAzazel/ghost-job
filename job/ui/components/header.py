@@ -20,7 +20,9 @@ def site_header(*, active: str) -> rx.Component:
                     color=ACCENT if is_active else MUTED,
                     font_size="0.9em",
                 ),
-                border_bottom=f"2px solid {ACCENT}" if is_active else "2px solid transparent",
+                border_bottom=f"2px solid {ACCENT}"
+                if is_active
+                else "2px solid transparent",
                 padding_bottom="0.35em",
             ),
             href=href,

@@ -423,7 +423,9 @@ class SearchUrl:
     @classmethod
     def by_city(cls, config: Mapping[str, Any]) -> list[tuple[str, str]]:
         """按所选城市顺序生成 [(城市名, 搜索 URL)]；未选城市时用默认城市。"""
-        cities = [c for c in config.get("cities") or [] if City.code(c)] or list(Defaults.CITIES)
+        cities = [c for c in config.get("cities") or [] if City.code(c)] or list(
+            Defaults.CITIES
+        )
         return [(city, cls.build(config, city)) for city in cities]
 
     @classmethod

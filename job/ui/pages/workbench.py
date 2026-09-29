@@ -58,7 +58,11 @@ class WorkbenchPage:
                 rx.spacer(),
             ),
             rx.text(
-                value, font_size="1.6em", font_weight="700", color=TEXT, margin_top="0.5em"
+                value,
+                font_size="1.6em",
+                font_weight="700",
+                color=TEXT,
+                margin_top="0.5em",
             ),
             rx.text(label, font_size="0.85em", color=TEXT, font_weight="600"),
             rx.text(hint, font_size="0.75em", color=MUTED, margin_top="0.15em"),
@@ -142,7 +146,9 @@ class WorkbenchPage:
             rx.box(
                 rx.vstack(
                     cls._status_row("投递", BossState.boss_state, BossState.busy),
-                    cls._status_row("回复", BossState.reply_state, BossState.reply_busy),
+                    cls._status_row(
+                        "回复", BossState.reply_state, BossState.reply_busy
+                    ),
                     rx.text(
                         rx.cond(
                             running,

@@ -207,11 +207,37 @@ class JobsPage:
                 disabled=JobsState.analyzing,
                 size="1",
             ),
-            rx.text("岗位名称", font_size="0.8em", color=MUTED, font_weight="600", flex="1.4"),
-            rx.text("公司", font_size="0.8em", color=MUTED, font_weight="600", flex="1"),
-            rx.text("是否合适", font_size="0.8em", color=MUTED, font_weight="600", width="72px"),
-            rx.text("判断描述", font_size="0.8em", color=MUTED, font_weight="600", flex="1.4"),
-            rx.text("匹配度", font_size="0.8em", color=MUTED, font_weight="600", width="90px"),
+            rx.text(
+                "岗位名称",
+                font_size="0.8em",
+                color=MUTED,
+                font_weight="600",
+                flex="1.4",
+            ),
+            rx.text(
+                "公司", font_size="0.8em", color=MUTED, font_weight="600", flex="1"
+            ),
+            rx.text(
+                "是否合适",
+                font_size="0.8em",
+                color=MUTED,
+                font_weight="600",
+                width="72px",
+            ),
+            rx.text(
+                "判断描述",
+                font_size="0.8em",
+                color=MUTED,
+                font_weight="600",
+                flex="1.4",
+            ),
+            rx.text(
+                "匹配度",
+                font_size="0.8em",
+                color=MUTED,
+                font_weight="600",
+                width="90px",
+            ),
             rx.box(
                 rx.text("操作", font_size="0.8em", color=MUTED, font_weight="600"),
                 width=cls.ACTION_WIDTH,
@@ -311,7 +337,9 @@ class JobsPage:
             rx.hstack(
                 JobsPage._action("eye", "详情", JobsState.open_detail(job["uid"])),
                 JobsPage._action(
-                    "building-2", "查企业", CompanyState.show(job["uid"], job["company"])
+                    "building-2",
+                    "查企业",
+                    CompanyState.show(job["uid"], job["company"]),
                 ),
                 JobsPage._action(
                     "trash-2",
@@ -392,7 +420,9 @@ class JobsPage:
                     ),
                     rx.alert_dialog.action(
                         rx.button(
-                            "删除", color_scheme="red", on_click=JobsState.confirm_delete
+                            "删除",
+                            color_scheme="red",
+                            on_click=JobsState.confirm_delete,
                         )
                     ),
                     spacing="3",
@@ -447,7 +477,9 @@ class JobsPage:
                 rx.vstack(
                     rx.hstack(
                         JobsPage._suitable_badge(JobsState.detail["suitable"]),
-                        rx.text(JobsState.detail["reason"], font_size="0.85em", color=TEXT),
+                        rx.text(
+                            JobsState.detail["reason"], font_size="0.85em", color=TEXT
+                        ),
                         spacing="2",
                         align="center",
                     ),
@@ -502,7 +534,9 @@ class JobsPage:
                 ),
                 rx.flex(
                     rx.dialog.close(
-                        rx.button("关闭", variant="soft", on_click=JobsState.close_detail)
+                        rx.button(
+                            "关闭", variant="soft", on_click=JobsState.close_detail
+                        )
                     ),
                     justify="end",
                     margin_top="1em",

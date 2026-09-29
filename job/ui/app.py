@@ -22,7 +22,9 @@ app = rx.App(
     },
 )
 # 替换默认的连接错误提示（Reflex 内置的 (5, "Overlay") 包装层）
-app.app_wraps[(5, "Overlay")] = lambda stateful: connection_overlay() if stateful else None
+app.app_wraps[(5, "Overlay")] = lambda stateful: (
+    connection_overlay() if stateful else None
+)
 app.add_page(
     WorkbenchPage.create,
     route="/",

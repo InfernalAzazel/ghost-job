@@ -70,9 +70,7 @@ class JobReviewer(BaseModel):
         if not requirement and not resume:
             return None
         min_score = config.get("min_score") if config.get("score_filter") else None
-        return cls(
-            requirement=requirement, resume=resume, min_score=min_score, llm=llm
-        )
+        return cls(requirement=requirement, resume=resume, min_score=min_score, llm=llm)
 
     @property
     def checks(self) -> list[str]:
@@ -115,7 +113,9 @@ class JobReviewer(BaseModel):
         """
         verdict = await self.review(job)
         score = verdict.score if self.resume else None
-        low = score is not None and self.min_score is not None and score < self.min_score
+        low = (
+            score is not None and self.min_score is not None and score < self.min_score
+        )
         if verdict.match and low:
             reason = f"匹配度 {score} 分，低于 {self.min_score} 分"
             return Verdict(match=False, reason=reason, score=score)

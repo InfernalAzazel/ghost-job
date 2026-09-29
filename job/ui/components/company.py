@@ -68,7 +68,13 @@ def _point(point: ObjectVar[dict]) -> rx.Component:
 
 def _info_item(item: ObjectVar[dict]) -> rx.Component:
     return rx.hstack(
-        rx.text(item["label"], font_size="0.8em", color=MUTED, width="110px", flex_shrink="0"),
+        rx.text(
+            item["label"],
+            font_size="0.8em",
+            color=MUTED,
+            width="110px",
+            flex_shrink="0",
+        ),
         rx.text(item["value"], font_size="0.8em", color=TEXT, word_break="break-all"),
         spacing="2",
         align="start",
@@ -81,7 +87,13 @@ def _hit(hit: ObjectVar[dict]) -> rx.Component:
         rx.hstack(
             _link(hit["title"], hit["href"], font_size="0.85em", font_weight="500"),
             rx.spacer(),
-            rx.badge(hit["query"], variant="soft", color_scheme="gray", size="1", flex_shrink="0"),
+            rx.badge(
+                hit["query"],
+                variant="soft",
+                color_scheme="gray",
+                size="1",
+                flex_shrink="0",
+            ),
             width="100%",
             align="center",
         ),
@@ -100,7 +112,9 @@ def _report() -> rx.Component:
             "AI 评估",
             rx.hstack(
                 risk_badge(report["risk"], report["risk_label"]),
-                rx.text(report["summary"], font_size="0.9em", color=TEXT, font_weight="500"),
+                rx.text(
+                    report["summary"], font_size="0.9em", color=TEXT, font_weight="500"
+                ),
                 spacing="2",
                 align="center",
             ),
@@ -110,7 +124,11 @@ def _report() -> rx.Component:
             "工商信息",
             rx.cond(
                 report["info"].to(list).length() > 0,
-                rx.vstack(rx.foreach(report["info"].to(list[dict]), _info_item), spacing="1", width="100%"),
+                rx.vstack(
+                    rx.foreach(report["info"].to(list[dict]), _info_item),
+                    spacing="1",
+                    width="100%",
+                ),
                 rx.text("BOSS 公司主页上没有工商信息", font_size="0.8em", color=MUTED),
             ),
         ),
@@ -128,7 +146,13 @@ def company_dialog() -> rx.Component:
     return rx.dialog.root(
         rx.dialog.content(
             rx.dialog.title(
-                rx.cond(CompanyState.has_report, rx.cond(report["full_name"] != "", report["full_name"], report["name"]), CompanyState.company),
+                rx.cond(
+                    CompanyState.has_report,
+                    rx.cond(
+                        report["full_name"] != "", report["full_name"], report["name"]
+                    ),
+                    CompanyState.company,
+                ),
             ),
             rx.dialog.description(
                 rx.cond(
@@ -156,9 +180,20 @@ def company_dialog() -> rx.Component:
             ),
             rx.cond(
                 CompanyState.error != "",
-                rx.callout(CompanyState.error, icon="triangle-alert", color_scheme="red", size="1", margin_bottom="0.75em"),
+                rx.callout(
+                    CompanyState.error,
+                    icon="triangle-alert",
+                    color_scheme="red",
+                    size="1",
+                    margin_bottom="0.75em",
+                ),
             ),
-            rx.cond(CompanyState.has_report, rx.scroll_area(_report(), max_height="60vh", type="auto", scrollbars="vertical")),
+            rx.cond(
+                CompanyState.has_report,
+                rx.scroll_area(
+                    _report(), max_height="60vh", type="auto", scrollbars="vertical"
+                ),
+            ),
             rx.hstack(
                 rx.spacer(),
                 rx.button(

@@ -43,7 +43,9 @@ class CompanyPoint(BaseModel):
     """评估依据。"""
 
     text: str = Field(description="一条依据，30 字以内")
-    href: str = Field(default="", description="依据来自哪条搜索结果的链接；来自工商信息时留空")
+    href: str = Field(
+        default="", description="依据来自哪条搜索结果的链接；来自工商信息时留空"
+    )
 
 
 # 文档字符串与字段说明会作为输出要求发给模型
@@ -58,7 +60,9 @@ class CompanyVerdict(BaseModel):
         )
     )
     summary: str = Field(description="一句话结论，40 字以内")
-    points: list[CompanyPoint] = Field(default_factory=list, description="最多 5 条依据")
+    points: list[CompanyPoint] = Field(
+        default_factory=list, description="最多 5 条依据"
+    )
 
 
 class CompanyPage:
@@ -102,7 +106,11 @@ class CompanyPage:
 
         async def read(page: Page) -> str:
             link = await page.wait_for_selector(self.COMPANY_LINK, timeout=self.TIMEOUT)
-            return self.brand_id_from(await link.get_attribute("href") or "") if link else ""
+            return (
+                self.brand_id_from(await link.get_attribute("href") or "")
+                if link
+                else ""
+            )
 
         return await self._read(job_link, read, "")
 
@@ -123,7 +131,9 @@ class CompanyPage:
 
         return await self._read(self.url(brand_id), read, {})
 
-    async def _read[T](self, url: str, read: Callable[[Page], Awaitable[T]], empty: T) -> T:
+    async def _read[T](
+        self, url: str, read: Callable[[Page], Awaitable[T]], empty: T
+    ) -> T:
         context = await self._session.open()
         page = await context.new_page()
         try:
@@ -147,13 +157,18 @@ class CompanySearch:
     max_results: int = 8
     timeout: int = 20
 
-    def __init__(self, text: Callable[[str], list[dict[str, Any]]] | None = None) -> None:
+    def __init__(
+        self, text: Callable[[str], list[dict[str, Any]]] | None = None
+    ) -> None:
         # 测试时可换成假的搜索函数
         self._text = text or self._ddgs
 
     def _ddgs(self, query: str) -> list[dict[str, Any]]:
         return DDGS(timeout=self.timeout).text(
-            query, region=self.region, backend=self.backend, max_results=self.max_results
+            query,
+            region=self.region,
+            backend=self.backend,
+            max_results=self.max_results,
         )
 
     async def search(
@@ -164,7 +179,9 @@ class CompanySearch:
         failed = 0
         for i, query in enumerate(self.QUERIES, 1):
             if on_step is not None:
-                await on_step(f"正在网上搜索「{name}」（{i}/{len(self.QUERIES)}：{query}）…")
+                await on_step(
+                    f"正在网上搜索「{name}」（{i}/{len(self.QUERIES)}：{query}）…"
+                )
             try:
                 items = await asyncio.to_thread(self._text, f"{name} {query}")
             except (DDGSException, OSError, RuntimeError):
@@ -222,9 +239,12 @@ class CompanyReviewer(BaseModel):
         self, name: str, full_name: str, info: dict[str, str], hits: list[SearchHit]
     ) -> str:
         business = "\n".join(f"{k}：{v}" for k, v in info.items()) or "未取得工商信息"
-        results = "\n\n".join(
-            f"[{i}] {h.title}\n{h.href}\n{h.body}" for i, h in enumerate(hits, 1)
-        ) or "没有搜索结果"
+        results = (
+            "\n\n".join(
+                f"[{i}] {h.title}\n{h.href}\n{h.body}" for i, h in enumerate(hits, 1)
+            )
+            or "没有搜索结果"
+        )
         return (
             f"公司简称：{name}\n企业全称：{full_name or '未知'}\n\n"
             f"工商信息：\n{business}\n\n搜索结果：\n{results}"
@@ -254,12 +274,16 @@ class CompanyChecker:
 
     NO_AI: ClassVar[str] = "未开通 AI 服务，只展示工商信息和搜索结果"
 
-    def __init__(self, page: Pages, search: Searcher, reviewer: Reviewer | None) -> None:
+    def __init__(
+        self, page: Pages, search: Searcher, reviewer: Reviewer | None
+    ) -> None:
         self._page = page
         self._search = search
         self._reviewer = reviewer
 
-    async def check(self, job_uid: str, on_step: Callable[[str], Awaitable[None]]) -> str:
+    async def check(
+        self, job_uid: str, on_step: Callable[[str], Awaitable[None]]
+    ) -> str:
         """查这个岗位所属的公司，返回公司 ID；找不到公司或搜索全部失败时抛 ``RuntimeError``。"""
         job = JobRow.get_dict(job_uid)
         if job is None:

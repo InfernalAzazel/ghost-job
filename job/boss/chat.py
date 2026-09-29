@@ -54,8 +54,12 @@ class Friend(BaseModel):
     name: str = ""
     company: str = Field(default="", validation_alias="brandName")
     job_id: str = Field(default="", validation_alias="encryptJobId")
-    last_from: str = Field(default="", validation_alias=AliasPath("lastMessageInfo", "fromId"))
-    last_mid: str = Field(default="", validation_alias=AliasPath("lastMessageInfo", "msgId"))
+    last_from: str = Field(
+        default="", validation_alias=AliasPath("lastMessageInfo", "fromId")
+    )
+    last_mid: str = Field(
+        default="", validation_alias=AliasPath("lastMessageInfo", "msgId")
+    )
 
     @field_validator("*", mode="before")
     @classmethod
@@ -159,7 +163,9 @@ class ChatReplier(BaseModel):
             ),
         )
 
-    async def reply(self, job: Job, history: list[ChatMessage], verdict: str) -> ChatDecision:
+    async def reply(
+        self, job: Job, history: list[ChatMessage], verdict: str
+    ) -> ChatDecision:
         """判断会话走向并生成回复；接口出错时抛 ``AgentRunError``。"""
         return (await self.agent.run(self.build_prompt(job, history, verdict))).output
 
@@ -359,7 +365,9 @@ class ChatResponder:
         try:
             await page.wait_for_selector(self.ITEM, timeout=20_000)
         except PlaywrightTimeoutError:
-            return not (await page.locator(self.LOGIN).is_visible() or "login" in page.url)
+            return not (
+                await page.locator(self.LOGIN).is_visible() or "login" in page.url
+            )
         return True
 
     async def _recent_friends(self, page: Page) -> list[Friend] | None:
@@ -394,7 +402,9 @@ class ChatResponder:
             return
         uid = JobRow.uid_for(job) if job.job_id else ""
         messages = await self._read_messages(page)
-        incoming = [m for m in self._record(messages, friend, uid) if m.from_hr and m.text]
+        incoming = [
+            m for m in self._record(messages, friend, uid) if m.from_hr and m.text
+        ]
         for message in incoming:
             await self._log(f"{friend.label}：{message.text}", "recv")
         if not (pending := self.unanswered(messages)):
@@ -428,7 +438,11 @@ class ChatResponder:
     ) -> list[ChatMessage]:
         """消息入库并关联岗位，返回新入库的。"""
         return ChatMessageRow.record_new(
-            messages, job_uid=uid, boss_id=friend.boss_id, hr_name=friend.name, auto=auto
+            messages,
+            job_uid=uid,
+            boss_id=friend.boss_id,
+            hr_name=friend.name,
+            auto=auto,
         )
 
     async def _apply(
@@ -437,7 +451,10 @@ class ChatResponder:
         """按 AI 的判断处理：HR 已拒绝就只更新沟通状态；否则发出回复，发出后再更新沟通状态。"""
         if decision.outcome == "hr_rejected":
             ChatStatusRow.follow_ai(
-                friend.boss_id, outcome=decision.outcome, interview=decision.interview, text=hr_text
+                friend.boss_id,
+                outcome=decision.outcome,
+                interview=decision.interview,
+                text=hr_text,
             )
             await self._log(f"{friend.label}（HR 已拒绝，不再回复）", "skip")
             return
@@ -448,17 +465,24 @@ class ChatResponder:
         self._record(await self._read_messages(page), friend, uid, auto=True)
         declined = decision.outcome == "declined"
         status = ChatStatusRow.follow_ai(
-            friend.boss_id, outcome=decision.outcome, interview=decision.interview, text=text
+            friend.boss_id,
+            outcome=decision.outcome,
+            interview=decision.interview,
+            text=text,
         )
         if status == "invited":
             await self._log(f"{friend.label}（识别到面试邀请，已标记有面试）")
         self._replied += 1
-        await self._log(f"回复 {friend.label}{'（已婉拒）' if declined else ''}：{text}", "reply")
+        await self._log(
+            f"回复 {friend.label}{'（已婉拒）' if declined else ''}：{text}", "reply"
+        )
         if decision.send_resume:
             if await self._accept_resume_request(page):
                 await self._log(f"{friend.label}（已同意 HR 的附件简历请求）", "reply")
             elif await self._send_resume(page):
-                await self._log(f"{friend.label}（已发送附件简历请求，对方确认后发到邮箱）", "reply")
+                await self._log(
+                    f"{friend.label}（已发送附件简历请求，对方确认后发到邮箱）", "reply"
+                )
             else:
                 await self._log(f"{friend.label}（发简历失败，请手动发送）", "warn")
         await self._rest_after(self._replied)
@@ -490,7 +514,9 @@ class ChatResponder:
     async def _read_messages(self, page: Page) -> list[ChatMessage]:
         """读取当前会话里的消息（从早到晚）。"""
         try:
-            return _validate_all(ChatMessage, await page.evaluate(self.READ_JS, self.MESSAGE))
+            return _validate_all(
+                ChatMessage, await page.evaluate(self.READ_JS, self.MESSAGE)
+            )
         except PlaywrightError:
             return []
 
@@ -563,7 +589,9 @@ class ChatResponder:
 
     async def _accept_resume_request(self, page: Page) -> bool:
         """HR 发来「我想要一份您的附件简历」卡片时点「同意」；没有待处理的请求或点完按钮没消失返回 False。"""
-        card = page.locator(f"{self.MESSAGE}.item-friend", has_text=self.RESUME_REQUEST).last
+        card = page.locator(
+            f"{self.MESSAGE}.item-friend", has_text=self.RESUME_REQUEST
+        ).last
         agree = card.get_by_text("同意", exact=True)
         try:
             if not await agree.count() or not await agree.first.is_visible():

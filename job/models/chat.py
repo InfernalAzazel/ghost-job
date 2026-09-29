@@ -41,13 +41,20 @@ class ChatStatusRow(SQLModel, table=True):
         "hr_rejected": "HR 已拒绝",
         "declined": "AI 已婉拒",
     }
-    INTERVIEWS: ClassVar[frozenset[str]] = frozenset({"invited", "done", "passed", "failed"})
+    INTERVIEWS: ClassVar[frozenset[str]] = frozenset(
+        {"invited", "done", "passed", "failed"}
+    )
     # 会话已结束：HR 没有新消息时不再回复
     ENDED: ClassVar[frozenset[str]] = frozenset({"hr_rejected", "declined", "failed"})
     # 只能手动标记的面试进展
     MANUAL: ClassVar[frozenset[str]] = frozenset({"done", "passed", "failed"})
     # 会话列表筛选；「无状态」是未标记任何状态，「所有面试」是任意面试状态
-    FILTERS: ClassVar[tuple[str, ...]] = ("全部", "无状态", "所有面试", *LABELS.values())
+    FILTERS: ClassVar[tuple[str, ...]] = (
+        "全部",
+        "无状态",
+        "所有面试",
+        *LABELS.values(),
+    )
     # 手动标记的选项；「无」是清除
     CHOICES: ClassVar[tuple[str, ...]] = ("无", *LABELS.values())
 
@@ -55,10 +62,14 @@ class ChatStatusRow(SQLModel, table=True):
     status: str = Field(description="状态值，见 LABELS")
     source: str = Field(default="manual", description="auto AI 标记 / manual 手动标记")
     text: str = Field(default="", description="触发标记的那句话（拒绝或婉拒时）")
-    updated_at: datetime = Field(default_factory=_now, description="最后更新时间（UTC）")
+    updated_at: datetime = Field(
+        default_factory=_now, description="最后更新时间（UTC）"
+    )
 
     @classmethod
-    def mark(cls, boss_id: str, status: str, *, source: str = "manual", text: str = "") -> None:
+    def mark(
+        cls, boss_id: str, status: str, *, source: str = "manual", text: str = ""
+    ) -> None:
         from job.models import db_session
 
         with db_session() as session:
@@ -87,7 +98,9 @@ class ChatStatusRow(SQLModel, table=True):
         return cls.statuses().get(boss_id, "") in cls.ENDED
 
     @classmethod
-    def follow_ai(cls, boss_id: str, *, outcome: str, interview: bool, text: str) -> str | None:
+    def follow_ai(
+        cls, boss_id: str, *, outcome: str, interview: bool, text: str
+    ) -> str | None:
         """按 AI 对会话的判断更新状态，返回变化后的状态值（清除为空串），没变返回 None。
 
         HR 拒绝 / AI 已婉拒直接标记；继续沟通时识别到面试邀请标「有面试」，
@@ -128,13 +141,17 @@ class ChatMessageRow(SQLModel, table=True):
     __tablename__ = "chat_message"  # pyright: ignore[reportAssignmentType]
 
     mid: str = Field(primary_key=True, description="BOSS 消息 ID")
-    job_uid: str = Field(default="", index=True, description="关联岗位主键（job.uid），无岗位时为空")
+    job_uid: str = Field(
+        default="", index=True, description="关联岗位主键（job.uid），无岗位时为空"
+    )
     boss_id: str = Field(default="", index=True, description="HR 的加密 ID")
     hr_name: str = Field(default="", description="HR 称呼")
     from_hr: bool = Field(default=True, description="是否 HR 发来的")
     text: str = ""
     auto: bool = Field(default=False, description="是否由自动回复发出")
-    created_at: datetime = Field(default_factory=_now, index=True, description="入库时间（UTC）")
+    created_at: datetime = Field(
+        default_factory=_now, index=True, description="入库时间（UTC）"
+    )
 
     @classmethod
     def record_new(
@@ -164,16 +181,20 @@ class ChatMessageRow(SQLModel, table=True):
                     session.add(row)
             fresh = [m for m in messages if m.mid not in rows]
             # 自动回复刚发出就入库，那时页面给的是临时 ID，之后换成正式 ID；按文字认出来换成正式 ID
-            stale = {
-                row.text: row
-                for row in session.exec(
-                    select(cls).where(
-                        cls.boss_id == boss_id,
-                        col(cls.auto).is_(True),
-                        col(cls.mid).not_in([m.mid for m in messages]),
-                    )
-                ).all()
-            } if any(not m.from_hr for m in fresh) else {}
+            stale = (
+                {
+                    row.text: row
+                    for row in session.exec(
+                        select(cls).where(
+                            cls.boss_id == boss_id,
+                            col(cls.auto).is_(True),
+                            col(cls.mid).not_in([m.mid for m in messages]),
+                        )
+                    ).all()
+                }
+                if any(not m.from_hr for m in fresh)
+                else {}
+            )
             for m in fresh:
                 old = None if m.from_hr else stale.pop(m.text, None)
                 if old is not None:
@@ -196,7 +217,9 @@ class ChatMessageRow(SQLModel, table=True):
 
     @property
     def local_time(self) -> datetime:
-        return self.created_at.replace(tzinfo=self.created_at.tzinfo or UTC).astimezone()
+        return self.created_at.replace(
+            tzinfo=self.created_at.tzinfo or UTC
+        ).astimezone()
 
     @classmethod
     def conversations(cls, search: str = "", status: str = "") -> list[dict[str, Any]]:
@@ -229,7 +252,9 @@ class ChatMessageRow(SQLModel, table=True):
         risks = CompanyRow.risks(j.brand_id for j in jobs.values())
         today = datetime.now().astimezone().date()
         items = []
-        for boss_id, last in sorted(latest.items(), key=lambda kv: kv[1].created_at, reverse=True):
+        for boss_id, last in sorted(
+            latest.items(), key=lambda kv: kv[1].created_at, reverse=True
+        ):
             current = statuses.get(boss_id, "")
             if not ChatStatusRow.matches(current, status):
                 continue
@@ -248,7 +273,9 @@ class ChatMessageRow(SQLModel, table=True):
                 "link": job.link if job else "",
                 "last_text": last.text,
                 "last_from_hr": last.from_hr,
-                "last_time": when.strftime("%H:%M" if when.date() == today else "%m-%d"),
+                "last_time": when.strftime(
+                    "%H:%M" if when.date() == today else "%m-%d"
+                ),
                 "status": current,
                 "status_label": ChatStatusRow.LABELS.get(current, ""),
                 "risk": risk,
@@ -285,8 +312,17 @@ class ChatMessageRow(SQLModel, table=True):
 
     # 导出时会话里保留的字段（去掉列表展示用的最后一条消息）
     EXPORT_FIELDS: ClassVar[tuple[str, ...]] = (
-        "boss_id", "hr_name", "hr_title", "company", "title", "salary", "location",
-        "link", "job_uid", "status", "status_label",
+        "boss_id",
+        "hr_name",
+        "hr_title",
+        "company",
+        "title",
+        "salary",
+        "location",
+        "link",
+        "job_uid",
+        "status",
+        "status_label",
     )
 
     @classmethod

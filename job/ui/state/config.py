@@ -297,7 +297,9 @@ class ConfigState(rx.State):
         if Pace.code(self.reply_pace_label) != ReplyPaceProfile.CUSTOM:
             return
         try:
-            profile = ReplyPaceProfile.model_validate({**self.reply_pace_params, key: value})
+            profile = ReplyPaceProfile.model_validate(
+                {**self.reply_pace_params, key: value}
+            )
         except ValidationError:
             self.save_hint = "请输入有效数字，停止时间需晚于开始时间"
             return

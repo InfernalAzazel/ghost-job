@@ -84,7 +84,11 @@ class MessagesPage:
                             color_scheme="gray",
                             size="2",
                             width="100%",
-                            style={"background": "transparent", "box_shadow": "none", "outline": "none"},
+                            style={
+                                "background": "transparent",
+                                "box_shadow": "none",
+                                "outline": "none",
+                            },
                         ),
                         spacing="2",
                         align="center",
@@ -115,7 +119,9 @@ class MessagesPage:
             rx.cond(
                 MessagesState.conversations.length() > 0,
                 rx.box(
-                    rx.foreach(MessagesState.conversations, lambda c: cls._conversation(c)),
+                    rx.foreach(
+                        MessagesState.conversations, lambda c: cls._conversation(c)
+                    ),
                     width="100%",
                     flex="1",
                     min_height="0",
@@ -152,7 +158,12 @@ class MessagesPage:
                 ),
             ),
             rx.menu.content(
-                rx.text("按沟通状态筛选", font_size="0.75em", color=MUTED, padding="0.3em 0.75em"),
+                rx.text(
+                    "按沟通状态筛选",
+                    font_size="0.75em",
+                    color=MUTED,
+                    padding="0.3em 0.75em",
+                ),
                 rx.foreach(
                     MessagesState.status_filters,
                     lambda label: rx.menu.item(
@@ -167,7 +178,9 @@ class MessagesPage:
                             align="center",
                             spacing="3",
                         ),
-                        color=rx.cond(label == MessagesState.status_filter, ACCENT, TEXT),
+                        color=rx.cond(
+                            label == MessagesState.status_filter, ACCENT, TEXT
+                        ),
                         style=MessagesPage.MENU_ITEM,
                         on_select=MessagesState.set_status_filter(label),
                     ),
@@ -389,7 +402,9 @@ class MessagesPage:
             rx.cond(
                 chat["title"] != "",
                 rx.hstack(
-                    rx.text("沟通职位", font_size="0.8em", color=MUTED, **cls.NO_SHRINK),
+                    rx.text(
+                        "沟通职位", font_size="0.8em", color=MUTED, **cls.NO_SHRINK
+                    ),
                     rx.text(
                         chat["title"],
                         font_size="0.85em",
@@ -407,7 +422,12 @@ class MessagesPage:
                         color=cls.SALARY,
                         **cls.NO_SHRINK,
                     ),
-                    rx.text(chat["location"], font_size="0.8em", color=MUTED, **cls.NO_SHRINK),
+                    rx.text(
+                        chat["location"],
+                        font_size="0.8em",
+                        color=MUTED,
+                        **cls.NO_SHRINK,
+                    ),
                     rx.spacer(),
                     rx.cond(
                         chat["job_uid"] != "",
@@ -418,7 +438,9 @@ class MessagesPage:
                                 spacing="1",
                                 align="center",
                             ),
-                            on_click=CompanyState.show(chat["job_uid"], chat["company"]),
+                            on_click=CompanyState.show(
+                                chat["job_uid"], chat["company"]
+                            ),
                             cursor="pointer",
                             color=ACCENT,
                             **cls.NO_SHRINK,
@@ -457,8 +479,15 @@ class MessagesPage:
             rx.box(
                 rx.cond(
                     message["text"].to(str) != "",
-                    rx.text(message["text"], font_size="0.9em", color=TEXT, white_space="pre-wrap"),
-                    rx.text("[卡片消息，请在 BOSS 直聘查看]", font_size="0.9em", color=MUTED),
+                    rx.text(
+                        message["text"],
+                        font_size="0.9em",
+                        color=TEXT,
+                        white_space="pre-wrap",
+                    ),
+                    rx.text(
+                        "[卡片消息，请在 BOSS 直聘查看]", font_size="0.9em", color=MUTED
+                    ),
                 ),
                 bg=rx.cond(mine, ACCENT_SOFT, CARD),
                 border=rx.cond(mine, "1px solid transparent", f"1px solid {BORDER}"),
@@ -470,7 +499,9 @@ class MessagesPage:
                 rx.text(message["time"], font_size="0.72em", color=MUTED),
                 rx.cond(
                     message["auto"],
-                    rx.badge("AI 自动回复", color_scheme="teal", variant="soft", size="1"),
+                    rx.badge(
+                        "AI 自动回复", color_scheme="teal", variant="soft", size="1"
+                    ),
                 ),
                 spacing="2",
                 align="center",
@@ -480,7 +511,11 @@ class MessagesPage:
             max_width="65%",
         )
         return rx.hstack(
-            rx.cond(mine, rx.fragment(), cls._avatar(MessagesState.active["hr_name"], "34px")),
+            rx.cond(
+                mine,
+                rx.fragment(),
+                cls._avatar(MessagesState.active["hr_name"], "34px"),
+            ),
             body,
             width="100%",
             justify=rx.cond(mine, "end", "start"),

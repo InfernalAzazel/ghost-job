@@ -90,7 +90,9 @@ class JobsState(rx.State):
             "uid": self.focus_uid,
         }
         self.total = JobRow.count(**filters)
-        max_page = max(1, math.ceil(self.total / self.page_size)) if self.page_size else 1
+        max_page = (
+            max(1, math.ceil(self.total / self.page_size)) if self.page_size else 1
+        )
         self.page = min(self.page, max_page)
         offset = (self.page - 1) * self.page_size
         self.rows = JobRow.list_dicts(**filters, limit=self.page_size, offset=offset)

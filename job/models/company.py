@@ -30,15 +30,21 @@ class CompanyRow(SQLModel, table=True):
     name: str = Field(default="", description="BOSS 上的公司简称")
     full_name: str = Field(default="", description="工商登记的企业名称；没取到为空")
     info: dict[str, str] = Field(
-        default_factory=dict, sa_column=Column(JSON), description="工商信息：字段名 → 值"
+        default_factory=dict,
+        sa_column=Column(JSON),
+        description="工商信息：字段名 → 值",
     )
     hits: list[dict[str, str]] = Field(
-        default_factory=list, sa_column=Column(JSON), description="搜索结果：[{title, href, body, query}]"
+        default_factory=list,
+        sa_column=Column(JSON),
+        description="搜索结果：[{title, href, body, query}]",
     )
     risk: str = Field(default="unknown", description="风险等级，见 RISK_LABELS")
     summary: str = Field(default="", description="AI 一句话结论")
     points: list[dict[str, str]] = Field(
-        default_factory=list, sa_column=Column(JSON), description="AI 给出的依据：[{text, href}]"
+        default_factory=list,
+        sa_column=Column(JSON),
+        description="AI 给出的依据：[{text, href}]",
     )
     checked_at: datetime = Field(default_factory=_now, description="查询时间（UTC）")
 
@@ -80,7 +86,9 @@ class CompanyRow(SQLModel, table=True):
             row = session.get(cls, brand_id)
         if row is None:
             return None
-        checked = row.checked_at.replace(tzinfo=row.checked_at.tzinfo or UTC).astimezone()
+        checked = row.checked_at.replace(
+            tzinfo=row.checked_at.tzinfo or UTC
+        ).astimezone()
         return {
             "brand_id": row.brand_id,
             "name": row.name,

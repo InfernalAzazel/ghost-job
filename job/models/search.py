@@ -102,7 +102,9 @@ class SearchConfigRow(SQLModel, table=True):
         default=DEFAULT_MIN_SCORE, description="最低匹配度 0–100，低于它的岗位跳过"
     )
     resume_path: str = Field(default="", description="简历 PDF 本地路径")
-    resume_text: str = Field(default="", description="简历文本（从 PDF 解析，可手动修改）")
+    resume_text: str = Field(
+        default="", description="简历文本（从 PDF 解析，可手动修改）"
+    )
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="最后更新时间（UTC）",

@@ -84,7 +84,9 @@ class BossSession:
         """启动 Playwright 并打开持久化 Chrome。"""
         self.user_data_dir.mkdir(parents=True, exist_ok=True)
         exe = self.chrome_executable()
-        browser: dict[str, Any] = {"executable_path": str(exe)} if exe else {"channel": "chrome"}
+        browser: dict[str, Any] = (
+            {"executable_path": str(exe)} if exe else {"channel": "chrome"}
+        )
         try:
             self._playwright = await async_playwright().start()
             return await self._playwright.chromium.launch_persistent_context(

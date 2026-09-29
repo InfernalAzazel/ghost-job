@@ -118,9 +118,12 @@ class BossState(rx.State):
             config = SearchConfigRow.load()
             resume = str(config.get("resume_text") or "").strip()
             problem = (
-                "请先在「求职配置 → 自动回复」开启自动回复" if not settings.enabled
-                else "请先在配置中心开通「AI 服务」" if not llm.ready
-                else "请先在「简历配置」上传简历" if not resume
+                "请先在「求职配置 → 自动回复」开启自动回复"
+                if not settings.enabled
+                else "请先在配置中心开通「AI 服务」"
+                if not llm.ready
+                else "请先在「简历配置」上传简历"
+                if not resume
                 else ""
             )
             if problem:
@@ -188,9 +191,7 @@ class BossState(rx.State):
             reviewer = JobReviewer.from_config(config, LlmSettings.load())
             resume = str(config.get("resume_text") or "").strip()
             if config.get("resume_match") and not resume:
-                self._push_log(
-                    "已开启简历技术匹配，请先在「简历配置」上传简历", "warn"
-                )
+                self._push_log("已开启简历技术匹配，请先在「简历配置」上传简历", "warn")
                 self.boss_state = "待完善简历"
                 return
             if JobRow.count_today() >= JobScraper.DAILY_LIMIT:
@@ -198,9 +199,7 @@ class BossState(rx.State):
                 self.boss_state = _STATUS["limit"]
                 return
             if reviewer and not reviewer.llm.ready:
-                self._push_log(
-                    "已开启 AI 筛选，请先在配置中心开通「AI 服务」", "warn"
-                )
+                self._push_log("已开启 AI 筛选，请先在配置中心开通「AI 服务」", "warn")
                 self.boss_state = "待开通 AI 服务"
                 return
             self.busy = True

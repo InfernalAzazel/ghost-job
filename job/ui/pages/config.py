@@ -214,7 +214,9 @@ class ConfigPage:
         return rx.box(
             rx.vstack(
                 rx.text(title, font_weight="700", color=TEXT),
-                rx.text(hint, font_size="0.8em", color=MUTED) if hint else rx.fragment(),
+                rx.text(hint, font_size="0.8em", color=MUTED)
+                if hint
+                else rx.fragment(),
                 spacing="1",
                 margin_bottom="0.85em",
             ),
@@ -486,7 +488,9 @@ class ConfigPage:
             rx.cond(
                 done,
                 rx.fragment(),
-                rx.link(action, on_click=on_click, font_size="0.85em", cursor="pointer"),
+                rx.link(
+                    action, on_click=on_click, font_size="0.85em", cursor="pointer"
+                ),
             ),
             spacing="2",
             align="center",
@@ -917,16 +921,26 @@ class ConfigPage:
             ),
             rx.vstack(
                 cls._pace_row(
-                    unit("看完一条停"), num("read_min"), unit("–"), num("read_max"),
+                    unit("看完一条停"),
+                    num("read_min"),
+                    unit("–"),
+                    num("read_max"),
                     unit("秒"),
                 ),
                 cls._pace_row(
-                    unit("每次翻页停"), num("scroll_min"), unit("–"),
-                    num("scroll_max"), unit("秒"),
+                    unit("每次翻页停"),
+                    num("scroll_min"),
+                    unit("–"),
+                    num("scroll_max"),
+                    unit("秒"),
                 ),
                 cls._pace_row(
-                    unit("每投"), num("rest_every", step="1"), unit("条歇"),
-                    num("rest_min"), unit("–"), num("rest_max"),
+                    unit("每投"),
+                    num("rest_every", step="1"),
+                    unit("条歇"),
+                    num("rest_min"),
+                    unit("–"),
+                    num("rest_max"),
                     unit("秒（0 条表示不歇）"),
                 ),
                 spacing="2",
@@ -1004,16 +1018,26 @@ class ConfigPage:
             ),
             rx.vstack(
                 cls._pace_row(
-                    unit("每天"), num("start_hour"), unit("点到"), num("end_hour"),
+                    unit("每天"),
+                    num("start_hour"),
+                    unit("点到"),
+                    num("end_hour"),
                     unit("点之间回复"),
                 ),
                 cls._pace_row(
-                    unit("收到消息后等"), num("delay_min", step="5"), unit("–"),
-                    num("delay_max", step="5"), unit("秒再回复"),
+                    unit("收到消息后等"),
+                    num("delay_min", step="5"),
+                    unit("–"),
+                    num("delay_max", step="5"),
+                    unit("秒再回复"),
                 ),
                 cls._pace_row(
-                    unit("每回复"), num("rest_every"), unit("条歇"),
-                    num("rest_min"), unit("–"), num("rest_max"),
+                    unit("每回复"),
+                    num("rest_every"),
+                    unit("条歇"),
+                    num("rest_min"),
+                    unit("–"),
+                    num("rest_max"),
                     unit("分钟（0 条表示不歇）"),
                 ),
                 spacing="2",

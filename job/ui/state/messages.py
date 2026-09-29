@@ -39,7 +39,9 @@ class MessagesState(rx.State):
 
     @rx.var
     def active(self) -> dict:
-        return next((c for c in self.conversations if c["boss_id"] == self.active_id), {})
+        return next(
+            (c for c in self.conversations if c["boss_id"] == self.active_id), {}
+        )
 
     @rx.var
     def selected_count(self) -> int:
@@ -56,11 +58,15 @@ class MessagesState(rx.State):
         return self.active.get("status_label") or "无"
 
     def _load(self) -> None:
-        self.conversations = ChatMessageRow.conversations(self.search, self.status_filter)
+        self.conversations = ChatMessageRow.conversations(
+            self.search, self.status_filter
+        )
         ids = [c["boss_id"] for c in self.conversations]
         if self.active_id not in ids:
             self.active_id = ids[0] if ids else ""
-        self.messages = ChatMessageRow.list_for_boss(self.active_id) if self.active_id else []
+        self.messages = (
+            ChatMessageRow.list_for_boss(self.active_id) if self.active_id else []
+        )
         self.selected = [i for i in self.selected if i in ids]
 
     @rx.event
@@ -103,7 +109,9 @@ class MessagesState(rx.State):
 
     @rx.event
     def toggle_select_all(self) -> None:
-        self.selected = [] if self.all_selected else [c["boss_id"] for c in self.conversations]
+        self.selected = (
+            [] if self.all_selected else [c["boss_id"] for c in self.conversations]
+        )
 
     @rx.event
     def clear_selection(self) -> None:
