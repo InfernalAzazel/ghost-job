@@ -96,12 +96,14 @@ class FakePage:
     def __init__(self, brand_id: str = "b1", info: dict[str, str] | None = None) -> None:
         self._brand_id, self._info = brand_id, info or {}
         self.looked_up: list[str] = []
+        self.opened: list[str] = []
 
     async def brand_id(self, link: str) -> str:
         self.looked_up.append(link)
         return self._brand_id
 
-    async def business(self, _brand_id: str) -> dict[str, str]:
+    async def business(self, brand_id: str) -> dict[str, str]:
+        self.opened.append(brand_id)
         return self._info
 
 
@@ -128,32 +130,40 @@ def _steps() -> tuple[list[str], object]:
     return steps, on_step
 
 
-def test_checker_looks_up_brand_id_and_saves(tmp_db):
-    JobRow.record(Job(job_id="j1", title="AI 工程师", company="昊誉"))
+def test_checker_reads_searches_reviews_and_saves(tmp_db):
+    JobRow.record(Job(job_id="j1", title="AI 工程师", company="昊誉", brand_id="b1"))
     page, search = FakePage(info={"企业名称": "广州昊誉信息科技有限公司"}), FakeSearch()
     steps, on_step = _steps()
     brand_id = asyncio.run(CompanyChecker(page, search, FakeReviewer()).check("j1", on_step))
 
     assert brand_id == "b1"
-    assert page.looked_up == [JobRow.get_dict("j1")["link"]]
-    assert JobRow.get_dict("j1")["brandId"] == "b1"
+    assert (page.looked_up, page.opened) == ([], ["b1"])
     assert search.names == ["广州昊誉信息科技有限公司"]
     saved = CompanyRow.get_dict("b1")
     assert (saved["risk"], saved["summary"], saved["name"]) == ("low", "未见负面", "昊誉")
     assert steps
 
 
-def test_checker_uses_known_brand_id_and_works_without_ai(tmp_db):
+def test_checker_works_without_ai(tmp_db):
     JobRow.record(Job(job_id="j1", title="AI 工程师", company="昊誉", brand_id="b9"))
-    page, search = FakePage(), FakeSearch()
+    search = FakeSearch()
     _, on_step = _steps()
-    asyncio.run(CompanyChecker(page, search, None).check("j1", on_step))
+    asyncio.run(CompanyChecker(FakePage(), search, None).check("j1", on_step))
 
-    assert page.looked_up == []
     assert search.names == ["昊誉"]
     saved = CompanyRow.get_dict("b9")
     assert saved["risk"] == "unknown"
     assert "AI 服务" in saved["summary"]
+
+
+def test_checker_looks_up_missing_brand_id(tmp_db):
+    JobRow.record(Job(job_id="j1", title="AI 工程师", company="昊誉"))
+    page = FakePage(brand_id="b2")
+    _, on_step = _steps()
+    assert asyncio.run(CompanyChecker(page, FakeSearch(), None).check("j1", on_step)) == "b2"
+
+    assert (page.looked_up, page.opened) == ([JobRow.get_dict("j1")["link"]], ["b2"])
+    assert JobRow.get_dict("j1")["brandId"] == "b2"
 
 
 def test_checker_without_company_page_raises(tmp_db):
