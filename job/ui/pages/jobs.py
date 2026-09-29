@@ -5,8 +5,10 @@ from __future__ import annotations
 import reflex as rx
 from reflex.vars import ObjectVar
 
+from job.ui.components.company import company_dialog, risk_badge
 from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
+from job.ui.state.company import CompanyState
 from job.ui.state.jobs import JobsState
 from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
 
@@ -16,7 +18,7 @@ class JobsPage:
 
     PAGE_SIZE_OPTIONS = ("15 / page", "30 / page", "50 / page")
     # 操作列宽度（表头与数据行对齐）
-    ACTION_WIDTH = "170px"
+    ACTION_WIDTH = "250px"
 
     @classmethod
     def create(cls) -> rx.Component:
@@ -27,6 +29,7 @@ class JobsPage:
                 cls._table(),
                 cls._pagination(),
                 cls._detail_dialog(),
+                company_dialog(),
                 cls._delete_dialog(),
                 cls._batch_delete_dialog(),
                 bg=CARD,
@@ -263,7 +266,21 @@ class JobsPage:
                 flex="1.4",
                 min_width="0",
             ),
-            rx.text(job["company"], font_size="0.85em", color=TEXT, flex="1", min_width="0"),
+            rx.hstack(
+                rx.text(
+                    job["company"],
+                    font_size="0.85em",
+                    color=TEXT,
+                    overflow="hidden",
+                    text_overflow="ellipsis",
+                    white_space="nowrap",
+                ),
+                risk_badge(job["risk"], job["riskLabel"]),
+                spacing="1",
+                align="center",
+                flex="1",
+                min_width="0",
+            ),
             rx.box(JobsPage._suitable_badge(job["suitable"]), width="72px"),
             rx.box(
                 rx.cond(
@@ -293,6 +310,9 @@ class JobsPage:
             ),
             rx.hstack(
                 JobsPage._action("eye", "详情", JobsState.open_detail(job["uid"])),
+                JobsPage._action(
+                    "building-2", "查企业", CompanyState.show(job["uid"], job["company"])
+                ),
                 JobsPage._action(
                     "trash-2",
                     "删除",

@@ -7,8 +7,10 @@ from typing import Any, ClassVar
 import reflex as rx
 from reflex.vars import ObjectVar
 
+from job.ui.components.company import company_dialog, risk_badge
 from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
+from job.ui.state.company import CompanyState
 from job.ui.state.messages import MessagesState
 from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
 
@@ -53,6 +55,7 @@ class MessagesPage:
                 overflow="hidden",
                 align="stretch",
             ),
+            company_dialog(),
         )
 
     @staticmethod
@@ -358,6 +361,7 @@ class MessagesPage:
             rx.hstack(
                 rx.text(chat["hr_name"], font_weight="700", color=TEXT),
                 rx.text(chat["company"], font_size="0.85em", color=MUTED),
+                risk_badge(chat["risk"], chat["risk_label"]),
                 rx.cond(chat["hr_title"] != "", rx.text("·", color=MUTED)),
                 rx.text(chat["hr_title"], font_size="0.85em", color=MUTED),
                 rx.spacer(),
@@ -405,6 +409,21 @@ class MessagesPage:
                     ),
                     rx.text(chat["location"], font_size="0.8em", color=MUTED, **cls.NO_SHRINK),
                     rx.spacer(),
+                    rx.cond(
+                        chat["job_uid"] != "",
+                        rx.link(
+                            rx.hstack(
+                                rx.icon("building-2", size=13),
+                                rx.text("查企业", font_size="0.8em"),
+                                spacing="1",
+                                align="center",
+                            ),
+                            on_click=CompanyState.show(chat["job_uid"], chat["company"]),
+                            cursor="pointer",
+                            color=ACCENT,
+                            **cls.NO_SHRINK,
+                        ),
+                    ),
                     rx.cond(
                         chat["job_uid"] != "",
                         rx.link(

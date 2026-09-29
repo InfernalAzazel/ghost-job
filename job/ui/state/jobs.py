@@ -116,6 +116,11 @@ class JobsState(rx.State):
         self._reload()
 
     @rx.event
+    def refresh(self) -> None:
+        """重新读当前页（如查企业后更新风险标签）。"""
+        self._reload()
+
+    @rx.event
     def set_search_and_reload(self, value: str):
         self.search = value
         self.focus_uid = ""
