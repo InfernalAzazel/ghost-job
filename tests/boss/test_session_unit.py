@@ -1,5 +1,6 @@
 """BossSession 配置单元测试。"""
 
+import asyncio
 from pathlib import Path
 
 from patchright.async_api import Error as PlaywrightError
@@ -96,6 +97,40 @@ def test_closed_browser_is_not_reused(tmp_path: Path):
     assert session.is_open
     session._on_closed(context)  # type: ignore[arg-type]
     assert not session.is_open
+
+
+class FakeTab:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.closed = False
+
+    def is_closed(self) -> bool:
+        return self.closed
+
+
+class FakeContext:
+    def __init__(self) -> None:
+        self.pages = [FakeTab("启动时的标签")]
+
+    async def new_page(self) -> FakeTab:
+        self.pages.append(FakeTab(f"新标签{len(self.pages)}"))
+        return self.pages[-1]
+
+
+def test_job_page_never_takes_chat_tab(tmp_path: Path):
+    session = BossSession(user_data_dir=tmp_path)
+    context = FakeContext()
+    session._context = context  # type: ignore[assignment]
+    session._job_page = context.pages[0]  # type: ignore[assignment]
+    first = asyncio.run(session.page())
+    assert first is context.pages[0]
+
+    chat = asyncio.run(context.new_page())  # 自动回复自己开的聊天页
+    first.closed = True
+    context.pages.remove(first)
+    job = asyncio.run(session.page())
+    assert job is not chat and job is context.pages[-1]
+    assert asyncio.run(session.page()) is job
 
 
 def test_non_windows_uses_channel(monkeypatch):

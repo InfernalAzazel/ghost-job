@@ -29,6 +29,7 @@ class BossSession:
         self.user_data_dir = user_data_dir or self.default_profile_dir()
         self._playwright: Playwright | None = None
         self._context: BrowserContext | None = None
+        self._job_page: Page | None = None
 
     @staticmethod
     def default_profile_dir() -> Path:
@@ -71,6 +72,7 @@ class BossSession:
             await self.close()
             self._context = await self._launch()
             self._context.on("close", self._on_closed)
+            self._job_page = next(iter(self._context.pages), None)
         return self._context
 
     def _on_closed(self, context: BrowserContext) -> None:
@@ -78,9 +80,15 @@ class BossSession:
             self._context = None
 
     async def page(self) -> Page:
-        """复用第一个标签页，没有就新建。"""
+        """投递专用的标签页：浏览器启动时自带的那个，被关掉就新开一个。
+
+        自动回复、同步、查企业都另开自己的标签页；不能按「第一个标签页」取，
+        启动时的标签被关掉后，第一个就是自动回复的聊天页，两边会互相跳转。
+        """
         context = await self.open()
-        return context.pages[0] if context.pages else await context.new_page()
+        if self._job_page is None or self._job_page.is_closed():
+            self._job_page = await context.new_page()
+        return self._job_page
 
     async def close(self) -> None:
         """关闭浏览器与 Playwright。"""
