@@ -9,8 +9,9 @@ from packaging.version import InvalidVersion, Version
 
 from job import __version__
 
+REPO_URL = "https://github.com/InfernalAzazel/ghost-job"
 # 用网页的跳转而不是 api.github.com：国内网络常连不上 API
-LATEST_URL = "https://github.com/InfernalAzazel/ghost-job/releases/latest"
+LATEST_URL = f"{REPO_URL}/releases/latest"
 TAG_PATH = "/releases/tag/"
 
 

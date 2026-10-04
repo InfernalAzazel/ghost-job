@@ -1,4 +1,4 @@
-"""配置中心页面（求职配置 + AI 服务）。"""
+"""配置中心页面（求职配置 + AI 服务 + 关于）。"""
 
 from __future__ import annotations
 
@@ -6,17 +6,20 @@ from typing import Any, ClassVar
 
 import reflex as rx
 
+from job import __version__
 from job.models.setting import LlmSettings
 from job.ui.components.form import field_label, form_title, switch_card
 from job.ui.components.header import site_header
 from job.ui.components.layout import page_root
 from job.ui.state.config import ConfigState
 from job.ui.state.llm import LlmState
+from job.ui.state.update import UpdateState
 from job.ui.theme import ACCENT, ACCENT_SOFT, BORDER, CARD, MUTED, TEXT
+from job.utils.update import REPO_URL
 
 
 class ConfigPage:
-    """配置中心：左侧菜单（求职配置 / AI 服务）+ 右侧内容。"""
+    """配置中心：左侧菜单（求职配置 / AI 服务 / 关于）+ 右侧内容。"""
 
     # 标签框里的无边框输入框样式
     BARE_INPUT: ClassVar[dict[str, str]] = {
@@ -32,6 +35,7 @@ class ConfigPage:
     MENU = (
         ("求职设置", (("search", "layout-grid", "求职配置"),)),
         ("高级设置", (("llm", "sparkles", "AI 服务"),)),
+        ("其他", (("about", "info", "关于"),)),
     )
 
     # 求职配置下的标签页：(tab, 图标, 名称)
@@ -51,9 +55,10 @@ class ConfigPage:
             rx.hstack(
                 cls._sidebar(),
                 rx.box(
-                    rx.cond(
-                        ConfigState.section == "llm",
-                        cls._llm_panel(),
+                    rx.match(
+                        ConfigState.section,
+                        ("llm", cls._llm_panel()),
+                        ("about", cls._about_panel()),
                         cls._search_panel(),
                     ),
                     bg=CARD,
@@ -1127,6 +1132,115 @@ class ConfigPage:
             spacing="4",
             align="start",
             overflow_y="auto",
+        )
+
+    # --- about panel ---
+
+    AUTHOR = "kylin"
+    AUTHOR_URL = "https://github.com/InfernalAzazel"
+
+    @classmethod
+    def _about_panel(cls) -> rx.Component:
+        """关于：项目初衷、作者与交流群、仓库地址、许可证。"""
+        body = {"font_size": "0.9em", "color": TEXT, "line_height": "1.7"}
+        return rx.vstack(
+            cls._panel_title(
+                "关于 Ghost Job", f"你的 BOSS 直聘智能投递助手 · v{__version__}"
+            ),
+            cls._section(
+                "项目初衷",
+                rx.vstack(
+                    rx.text(
+                        "找工作本身已经足够辛苦。Ghost Job 希望把重复、机械的投递工作交给程序，"
+                        "让求职者把精力留给准备面试、提升自己，更快找到合适的工作。",
+                        **body,
+                    ),
+                    rx.text(
+                        "本项目免费开源，仅供个人求职、学习与研究使用，禁止任何形式的商业用途。"
+                        "请合理使用，遵守 BOSS 直聘的用户协议，"
+                        "不要用于批量骚扰 HR 或其他损害平台与他人利益的行为。",
+                        **body,
+                    ),
+                    spacing="2",
+                ),
+            ),
+            cls._section(
+                "作者",
+                rx.hstack(
+                    rx.vstack(
+                        rx.text(cls.AUTHOR, font_weight="600", color=TEXT),
+                        cls._about_link("user", "@InfernalAzazel", cls.AUTHOR_URL),
+                        rx.text(
+                            "使用中遇到问题、有功能建议，或想和其他求职者交流经验，"
+                            "欢迎扫码添加作者微信，备注「Ghost Job」，拉你进交流群。",
+                            font_size="0.8em",
+                            color=MUTED,
+                            line_height="1.6",
+                        ),
+                        spacing="2",
+                        flex="1",
+                    ),
+                    rx.image(
+                        src="/wechat.jpg",
+                        alt="作者微信",
+                        width="140px",
+                        border_radius="8px",
+                        border=f"1px solid {BORDER}",
+                        flex_shrink="0",
+                    ),
+                    spacing="5",
+                    align="start",
+                    width="100%",
+                    max_width="560px",
+                ),
+            ),
+            cls._section(
+                "仓库地址",
+                rx.vstack(
+                    cls._about_link("git-branch", REPO_URL, REPO_URL),
+                    rx.hstack(
+                        rx.button(
+                            rx.icon("star", size=16),
+                            "去 GitHub 点个 Star",
+                            on_click=UpdateState.open_link(REPO_URL),
+                            variant="outline",
+                        ),
+                        rx.button(
+                            rx.icon("bug", size=16),
+                            "反馈问题",
+                            on_click=UpdateState.open_link(f"{REPO_URL}/issues"),
+                            variant="outline",
+                        ),
+                        spacing="2",
+                    ),
+                    spacing="3",
+                ),
+                hint="如果 Ghost Job 帮你省下了投递时间，欢迎点个 Star 支持一下",
+            ),
+            rx.text(
+                "许可证：PolyForm Noncommercial License 1.0.0，非商业用途可自由使用、修改和分发",
+                font_size="0.8em",
+                color=MUTED,
+            ),
+            width="100%",
+            spacing="4",
+            align="start",
+            overflow_y="auto",
+        )
+
+    @staticmethod
+    def _about_link(icon: str, label: str, url: str) -> rx.Component:
+        """用系统浏览器打开的链接。"""
+        return rx.link(
+            rx.hstack(
+                rx.icon(icon, size=14),
+                rx.text(label, font_size="0.85em"),
+                spacing="2",
+                align="center",
+            ),
+            color=ACCENT,
+            cursor="pointer",
+            on_click=UpdateState.open_link(url),
         )
 
     @staticmethod

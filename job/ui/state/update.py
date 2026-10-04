@@ -1,4 +1,4 @@
-"""导航栏的新版本提示。"""
+"""导航栏的新版本提示，以及用系统浏览器打开外部链接。"""
 
 from __future__ import annotations
 
@@ -26,3 +26,8 @@ class UpdateState(rx.State):
     def open_release(self):
         if self.url:
             webbrowser.open(self.url)
+
+    @rx.event
+    def open_link(self, url: str):
+        """用系统浏览器打开链接（桌面窗口里的普通链接打不开外部网页）。"""
+        webbrowser.open(url)
