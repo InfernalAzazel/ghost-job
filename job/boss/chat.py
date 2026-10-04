@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import random
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import cached_property
 from itertools import takewhile
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
@@ -28,7 +28,12 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from job.boss.filters import BASE_URL, KeywordFilter, ReplyPaceProfile
 from job.boss.jobs import Job, LogSink, read_description
 from job.boss.session import BrowserClosed
-from job.models.chat import ChatMessage, ChatMessageRow, ChatStatusRow
+from job.models.chat import (
+    ChatCheckedRow,
+    ChatMessage,
+    ChatMessageRow,
+    ChatStatusRow,
+)
 from job.models.job import JobRow
 from job.models.setting import LlmSettings
 from job.utils import as_dict, log
@@ -219,10 +224,11 @@ class ChatResponder:
       return {code: detail.code, result: detail.zpData?.result || []};
     }
     """
-    # 一个会话的历史消息（从早到晚，最多翻 pages 页）；withBoss 时带上岗位接口 getBossData 的原始返回
+    # 一个会话的历史消息（从早到晚，最多翻 pages 页）；complete 表示已经翻到最早一条；
+    # withBoss 时带上岗位接口 getBossData 的原始返回
     HISTORY_JS = """
     async ({bossId, securityId, pages, withBoss}) => {
-      let messages = [], maxMsgId = '0';
+      let messages = [], maxMsgId = '0', complete = false;
       for (let i = 0; i < pages; i++) {
         const q = new URLSearchParams({bossId, groupId: bossId, maxMsgId, c: '20', page: '1',
           src: '0', securityId});
@@ -230,13 +236,13 @@ class ChatResponder:
         if (r.code !== 0) return {code: r.code};
         const batch = r.zpData?.messages || [];
         messages = batch.concat(messages);
-        if (!r.zpData?.hasMore || !batch.length) break;
+        if (!r.zpData?.hasMore || !batch.length) { complete = true; break; }
         maxMsgId = String(r.zpData.minMsgId);
       }
-      if (!withBoss) return {code: 0, messages};
+      if (!withBoss) return {code: 0, messages, complete};
       const q = new URLSearchParams({bossId, bossSource: '0', securityId});
       const boss = await fetch('/wapi/zpchat/geek/getBossData?' + q).then(r => r.json());
-      return {code: 0, messages, boss};
+      return {code: 0, messages, complete, boss};
     }
     """
     # BOSS 表情在消息里是「[微笑]」这样的代码，聊天页显示成图片，入库时去掉
@@ -303,7 +309,7 @@ class ChatResponder:
         self._stop = asyncio.Event()
         # 已处理过的 HR 最后一条消息，失败也不再重复处理
         self._handled: set[str] = set()
-        # 已读过历史消息的新会话（没有可入库的消息时不再重复读）
+        # 已读过历史消息的会话最后一条消息 ID（没有可入库的消息时不再重复读）
         self._seen: set[str] = set()
         self._replier: ChatReplier | None = None
         self._pace = ReplyPaceProfile()
@@ -443,6 +449,21 @@ class ChatResponder:
         """会话详情列表 → Friend；缺 HR ID 或格式不对的跳过。"""
         return [f for f in _validate_all(Friend, items) if f.boss_id]
 
+    @staticmethod
+    def prune_history(boss_id: str, data: dict[str, Any]) -> None:
+        """读到了完整的历史消息时，删掉本地有、BOSS 上已经没有的消息
+        （同一个 HR 打招呼新岗位时，BOSS 会清掉会话之前的消息）。
+        """
+        if data.get("complete") is True:
+            items = data.get("messages")
+            ChatMessageRow.prune(
+                boss_id,
+                {
+                    str(as_dict(m).get("mid"))
+                    for m in (items if isinstance(items, list) else [])
+                },
+            )
+
     @classmethod
     def parse_history(cls, items: Any, hr_uid: str) -> list[ChatMessage]:
         """历史消息接口 → 聊天记录（从早到晚），与从聊天页读到的一致。
@@ -463,19 +484,31 @@ class ChatResponder:
             if not item.get("mid") or not text or text.endswith(cls.RECALLED):
                 continue
             sender = str(as_dict(item.get("from")).get("uid") or "")
+            ms = item.get("time")
             messages.append(
-                ChatMessage(mid=str(item["mid"]), from_hr=sender == hr_uid, text=text)
+                ChatMessage(
+                    mid=str(item["mid"]),
+                    from_hr=sender == hr_uid,
+                    text=text,
+                    sent_at=datetime.fromtimestamp(ms / 1000, UTC)
+                    if isinstance(ms, int | float) and ms > 0
+                    else None,
+                )
             )
         return sorted(messages, key=lambda m: int(m.mid) if m.mid.isdigit() else 0)
 
     async def _record_quiet(self, page: Page, friends: list[Friend]) -> None:
-        """库里还没有、也不在等我回复的会话（如投递后 BOSS 替我发的打招呼），读历史消息入库。
+        """不在等我回复、最后一条消息还没读过的会话（如投递后 BOSS 替我发的打招呼，
+        同一个 HR 的新岗位也是），读历史消息入库。
 
         不点开会话，只调历史消息接口；岗位按会话里的职位 ID 关联库里已有的岗位。
         """
-        skip = ChatMessageRow.boss_ids() | self._seen
-        for friend in friends:
-            if friend.waiting or friend.boss_id in skip or self._stop.is_set():
+        quiet = [f for f in friends if not f.waiting and f.last_mid not in self._seen]
+        unread = ChatCheckedRow.unread({f.boss_id: f.last_mid for f in quiet})
+        known = ChatMessageRow.boss_ids() | ChatCheckedRow.boss_ids()
+        fresh = {f.boss_id for f in quiet} - known
+        for friend in quiet:
+            if friend.boss_id not in unread | fresh or self._stop.is_set():
                 continue
             await self._sleep(random.uniform(*self.QUIET_GAP))
             try:
@@ -499,7 +532,8 @@ class ChatResponder:
             if data.get("code") != 0:
                 log(f"读取 {friend.label} 的消息失败：code={data.get('code')}", "chat")
                 continue
-            self._seen.add(friend.boss_id)
+            self._seen.add(friend.last_mid)
+            ChatCheckedRow.mark(friend.boss_id, friend.last_mid)
             uid = (
                 friend.job_id
                 if friend.job_id and JobRow.get_dict(friend.job_id)
@@ -509,6 +543,7 @@ class ChatResponder:
                 self.parse_history(data.get("messages"), friend.uid), friend, uid
             ):
                 log(f"{friend.label} 的新会话已入库", "chat")
+            self.prune_history(friend.boss_id, data)
 
     async def _handle(self, page: Page, friend: Friend) -> None:
         """处理一位 HR 的新消息：读取入库 → 判断岗位 → 等待 → 回复。"""

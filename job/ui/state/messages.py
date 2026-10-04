@@ -135,8 +135,11 @@ class MessagesState(rx.State):
             return rx.toast.warning("需要登录 BOSS，请在浏览器里登录后再同步")
         head = "已停止同步" if result.state == "stopped" else "同步完成"
         failed = f"，{result.failed} 个读取失败" if result.failed else ""
+        updated = f"，{result.updated} 个会话有新消息" if result.updated else ""
+        empty = f"，{result.empty} 个没有可记录的消息" if result.empty else ""
         return rx.toast.success(
-            f"{head}：新增 {result.chats} 个会话、{result.jobs} 个岗位{failed}"
+            f"{head}：新增 {result.chats} 个会话、{result.jobs} 个岗位"
+            f"{updated}{failed}{empty}"
         )
 
     @rx.event

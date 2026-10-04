@@ -23,6 +23,8 @@ class ChatMessage(BaseModel):
     # 是否 HR 发来的（否则是我发的）
     from_hr: bool
     text: str = ""
+    # BOSS 上的发送时间（UTC）；从聊天页读到的消息没有
+    sent_at: datetime | None = None
 
 
 class ChatStatusRow(SQLModel, table=True):
@@ -135,6 +137,54 @@ class ChatStatusRow(SQLModel, table=True):
         return cls.LABELS.get(status) == wanted
 
 
+class ChatCheckedRow(SQLModel, table=True):
+    """会话读到的最后一条消息：最后一条是职位卡片、撤回提示等不入库的消息时，靠它认出没有新消息。"""
+
+    __tablename__ = "chat_checked"  # pyright: ignore[reportAssignmentType]
+
+    boss_id: str = Field(primary_key=True, description="HR 的加密 ID")
+    last_mid: str = Field(default="", description="读到的最后一条消息 ID")
+    updated_at: datetime = Field(default_factory=_now, description="读取时间（UTC）")
+
+    @classmethod
+    def mark(cls, boss_id: str, last_mid: str) -> None:
+        from job.models import db_session
+
+        with db_session() as session:
+            session.merge(cls(boss_id=boss_id, last_mid=last_mid))
+            session.commit()
+
+    @classmethod
+    def boss_ids(cls) -> set[str]:
+        from job.models import db_session
+
+        with db_session() as session:
+            return set(session.exec(select(cls.boss_id)).all())
+
+    @classmethod
+    def unread(cls, last_mids: dict[str, str]) -> set[str]:
+        """HR → 会话最后一条消息 ID；返回最后一条既没入库、也没读过的 HR。"""
+        from job.models import db_session
+
+        mids = {m for m in last_mids.values() if m}
+        with db_session() as session:
+            stored = set(
+                session.exec(
+                    select(ChatMessageRow.mid).where(col(ChatMessageRow.mid).in_(mids))
+                ).all()
+            )
+            checked = set(
+                session.exec(
+                    select(cls.last_mid).where(col(cls.last_mid).in_(mids))
+                ).all()
+            )
+        return {
+            b
+            for b, m in last_mids.items()
+            if m and m not in stored and m not in checked
+        }
+
+
 class ChatMessageRow(SQLModel, table=True):
     """与 HR 的一条聊天消息。"""
 
@@ -150,7 +200,9 @@ class ChatMessageRow(SQLModel, table=True):
     text: str = ""
     auto: bool = Field(default=False, description="是否由自动回复发出")
     created_at: datetime = Field(
-        default_factory=_now, index=True, description="入库时间（UTC）"
+        default_factory=_now,
+        index=True,
+        description="BOSS 上的发送时间（UTC），读不到时为入库时间",
     )
 
     @classmethod
@@ -174,10 +226,15 @@ class ChatMessageRow(SQLModel, table=True):
                     select(cls).where(col(cls.mid).in_([m.mid for m in messages]))
                 ).all()
             }
-            # 之前没读到文字的卡片消息（如 HR 索要简历），这次读到了就补上
+            # 之前没读到文字的卡片消息（如 HR 索要简历）补上文字；从聊天页读到的消息补上 BOSS 的发送时间
             for m in messages:
-                if (row := rows.get(m.mid)) is not None and not row.text and m.text:
+                if (row := rows.get(m.mid)) is None:
+                    continue
+                if not row.text and m.text:
                     row.text = m.text
+                    session.add(row)
+                if m.sent_at and row.created_at != m.sent_at.replace(tzinfo=None):
+                    row.created_at = m.sent_at
                     session.add(row)
             fresh = [m for m in messages if m.mid not in rows]
             # 自动回复刚发出就入库，那时页面给的是临时 ID，之后换成正式 ID；按文字认出来换成正式 ID
@@ -209,11 +266,27 @@ class ChatMessageRow(SQLModel, table=True):
                         from_hr=m.from_hr,
                         text=m.text,
                         auto=old.auto if old else auto and not m.from_hr,
-                        created_at=old.created_at if old else _now(),
+                        created_at=m.sent_at or (old.created_at if old else _now()),
                     )
                 )
             session.commit()
         return fresh
+
+    @classmethod
+    def prune(cls, boss_id: str, keep: set[str]) -> int:
+        """删掉这个 HR 不在 ``keep`` 里的消息，返回删除条数；``keep`` 为空时不删。"""
+        from job.models import db_session
+
+        if not keep:
+            return 0
+        with db_session() as session:
+            rows = session.exec(
+                select(cls).where(cls.boss_id == boss_id, col(cls.mid).not_in(keep))
+            ).all()
+            for row in rows:
+                session.delete(row)
+            session.commit()
+        return len(rows)
 
     @classmethod
     def boss_ids(cls) -> set[str]:

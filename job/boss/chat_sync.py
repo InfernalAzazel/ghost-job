@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from job.boss.chat import ChatResponder, Friend, job_from_boss_data
 from job.boss.filters import KeywordFilter
-from job.models.chat import ChatMessageRow
+from job.models.chat import ChatCheckedRow, ChatMessageRow
 from job.models.job import JobRow
 from job.utils import as_dict, log
 
@@ -34,14 +34,18 @@ class SyncResult(BaseModel):
     """一次同步的结果。"""
 
     state: Literal["done", "stopped", "need_login"] = "done"
-    # 新入库的会话数、岗位数与读取失败的会话数
+    # 新入库的会话数、有新消息的已有会话数、岗位数、读取失败的会话数与没有可入库消息的新会话数
     chats: int = 0
+    updated: int = 0
     jobs: int = 0
     failed: int = 0
+    empty: int = 0
 
 
 class ChatSyncer:
-    """逐个读取库里没有的会话：历史消息 → 岗位 → 入库；每个会话之间随机停顿，可随时停止。"""
+    """逐个读取库里没有的会话与有新消息的已有会话（如同一个 HR 的新岗位打招呼）：
+    历史消息 → 岗位 → 入库；每个会话之间随机停顿，可随时停止。
+    """
 
     # 全部会话的 ID：[{friendId, bossId}]
     IDS_JS = """
@@ -82,7 +86,7 @@ class ChatSyncer:
     async def run(
         self, keywords: KeywordFilter, on_progress: ProgressSink
     ) -> SyncResult:
-        """同步库里没有的全部会话；打开聊天页或读会话列表失败时抛 ``RuntimeError``。"""
+        """同步库里没有的会话与有新消息的会话；打开聊天页或读会话列表失败时抛 ``RuntimeError``。"""
         self._stop.clear()
         self.running = True
         result = SyncResult()
@@ -94,26 +98,23 @@ class ChatSyncer:
                 raise RuntimeError("网络异常，打开聊天页失败，请稍后重试")
             if not opened:
                 return result.model_copy(update={"state": "need_login"})
-            known = ChatMessageRow.boss_ids()
-            todo = [
+            stored = ChatMessageRow.boss_ids()
+            known = stored | ChatCheckedRow.boss_ids()
+            ids = [
                 i
                 for i in map(as_dict, await self._query(page, self.IDS_JS))
-                if i.get("bossId") and i["bossId"] not in known
+                if i.get("bossId")
             ]
-            log(f"同步：BOSS 上有 {len(todo)} 个会话库里还没有", "chat")
-            for start in range(0, len(todo), self.BATCH):
-                ids = ",".join(
-                    str(i["friendId"]) for i in todo[start : start + self.BATCH]
+            todo = await self._pending(page, ids, known)
+            log(f"同步：BOSS 上有 {len(todo)} 个会话需要读取", "chat")
+            for n, friend in enumerate(todo, 1):
+                if self._stop.is_set():
+                    return result.model_copy(update={"state": "stopped"})
+                await on_progress(n, len(todo), friend.label)
+                await self._sync_one(
+                    page, friend, keywords, result, new=friend.boss_id not in stored
                 )
-                friends = ChatResponder.parse_friends(
-                    await self._query(page, self.DETAIL_JS, ids)
-                )
-                for n, friend in enumerate(friends, start + 1):
-                    if self._stop.is_set():
-                        return result.model_copy(update={"state": "stopped"})
-                    await on_progress(n, len(todo), friend.label)
-                    await self._sync_one(page, friend, keywords, result)
-                    await self._sleep(random.uniform(*self.GAP))
+                await self._sleep(random.uniform(*self.GAP))
             return result
         finally:
             self.running = False
@@ -121,8 +122,44 @@ class ChatSyncer:
                 with contextlib.suppress(PlaywrightError):
                     await page.close()
 
+    async def _pending(
+        self, page: Page, ids: list[dict[str, Any]], known: set[str]
+    ) -> list[Friend]:
+        """要读的会话：库里没有的会话，加上最后一条消息还没读过的已有会话。
+
+        会话列表按更新时间排，已有会话从前往后一批批查详情，
+        查到一整批都没有新消息就停，之后只查库里没有的会话。
+        """
+        pending: list[Friend] = []
+        scanned = 0
+        while scanned < len(ids):
+            friends = await self._details(page, ids[scanned : scanned + self.BATCH])
+            scanned += self.BATCH
+            unread = ChatCheckedRow.unread({f.boss_id: f.last_mid for f in friends})
+            pending += [
+                f for f in friends if f.boss_id not in known or f.boss_id in unread
+            ]
+            if not any(f.boss_id in known for f in friends if f.boss_id in unread):
+                break
+        rest = [i for i in ids[scanned:] if i["bossId"] not in known]
+        for start in range(0, len(rest), self.BATCH):
+            pending += await self._details(page, rest[start : start + self.BATCH])
+        return pending
+
+    async def _details(self, page: Page, ids: list[dict[str, Any]]) -> list[Friend]:
+        friend_ids = ",".join(str(i["friendId"]) for i in ids)
+        return ChatResponder.parse_friends(
+            await self._query(page, self.DETAIL_JS, friend_ids)
+        )
+
     async def _sync_one(
-        self, page: Page, friend: Friend, keywords: KeywordFilter, result: SyncResult
+        self,
+        page: Page,
+        friend: Friend,
+        keywords: KeywordFilter,
+        result: SyncResult,
+        *,
+        new: bool = True,
     ) -> None:
         """读一个会话的消息和岗位入库；读取失败只记数，不中断同步。"""
         try:
@@ -155,10 +192,18 @@ class ChatSyncer:
             JobRow.record(job, suitable=not reason, reason=reason or self.SYNCED)
             result.jobs += 1
         messages = ChatResponder.parse_history(data.get("messages"), friend.uid)
-        if ChatMessageRow.record_new(
+        ChatCheckedRow.mark(friend.boss_id, friend.last_mid)
+        recorded = ChatMessageRow.record_new(
             messages, job_uid=uid, boss_id=friend.boss_id, hr_name=friend.name
-        ):
-            result.chats += 1
+        )
+        ChatResponder.prune_history(friend.boss_id, data)
+        if recorded:
+            if new:
+                result.chats += 1
+            else:
+                result.updated += 1
+        elif new and not messages:
+            result.empty += 1
 
     @staticmethod
     async def _query(page: Page, script: str, arg: Any = None) -> list[Any]:
