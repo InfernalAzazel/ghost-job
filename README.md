@@ -400,6 +400,6 @@ uv run pytest -q            # 运行测试
 
 ## 许可证
 
-本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE) 许可证：个人使用、学习研究、公益与教育机构等非商业用途可以自由使用、修改和分发；**任何商业用途均不被允许**。如需商业授权，请通过 [Issues](https://github.com/InfernalAzazel/ghost-job/issues) 联系作者。
+本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE) 许可证：个人使用、学习研究、公益与教育机构等非商业用途可以自由使用、修改和分发；**任何商业用途均不被允许**。
 
 分发本软件或修改版本时，请保留 LICENSE 文件以及其中的 `Required Notice` 版权声明。
