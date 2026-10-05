@@ -1,16 +1,31 @@
+import logging
+import os
 import sys
 from pathlib import Path
 
 import reflex as rx
 from reflex_desktop import DesktopPlugin
 
-# Windows GUI launches have no stdout/stderr (None), which crashes uvicorn's logging setup
-if sys.stdout is None or sys.stderr is None:
+# Windows GUI launches have no stdout/stderr (None), which crashes uvicorn's logging
+# setup; macOS GUI launches point them at /dev/null. Installed builds (embedded
+# backend) log to a file.
+if (
+    sys.stdout is None
+    or sys.stderr is None
+    or os.environ.get("REFLEX_DESKTOP_APP_ROOT")
+):
     _log = Path.home() / ".ghost-job" / "logs" / "backend.log"
     _log.parent.mkdir(parents=True, exist_ok=True)
-    _stream = _log.open("a", encoding="utf-8", buffering=1)
-    sys.stdout = sys.stdout or _stream
-    sys.stderr = sys.stderr or _stream
+    _big = _log.exists() and _log.stat().st_size > 5 * 1024 * 1024
+    _stream = _log.open("w" if _big else "a", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stderr = _stream
+    # Outside the reflex CLI no handler is attached, so backend exceptions would vanish
+    _handler = logging.StreamHandler(_stream)
+    _handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    _handler.setLevel(logging.WARNING)
+    logging.getLogger().addHandler(_handler)
 
 config = rx.Config(
     app_name="job",

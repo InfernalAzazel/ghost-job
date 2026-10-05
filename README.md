@@ -428,7 +428,7 @@ BOSS 直聘每天约 150 次沟通上限，Ghost Job 会在达到上限时自动
 在应用上右键选择「打开」，或前往「系统设置 → 隐私与安全性」点击「仍要打开」。
 
 **我的数据存在哪里？**
-全部在本机 `~/.ghost-job/` 目录：岗位与配置在 `ghost-job.db`，简历在 `resumes/`，Chrome 登录状态在 `chrome-profile/`。
+全部在本机 `~/.ghost-job/` 目录：岗位与配置在 `ghost-job.db`，简历在 `resumes/`，Chrome 登录状态在 `chrome-profile/`，后台日志在 `logs/backend.log`（提 Issue 时可以附上，注意去掉个人信息）。
 
 ## 加入交流群
 

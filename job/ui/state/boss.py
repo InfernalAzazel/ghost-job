@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 import reflex as rx
@@ -18,6 +19,8 @@ from job.models import init_db
 from job.models.job import JobRow
 from job.models.search import SearchConfigRow
 from job.models.setting import AutoReplySettings, LlmSettings
+
+logger = logging.getLogger(__name__)
 
 _session = BossSession()
 _scraper = JobScraper(_session)
@@ -181,6 +184,12 @@ class BossState(rx.State):
                 self.reply_state = "出错"
                 self._push_log(str(exc), "warn")
                 self.reply_busy = False
+        except Exception as exc:
+            logger.exception("自动回复出错")
+            async with self:
+                self.reply_state = "出错"
+                self._push_log(f"自动回复出错：{exc!r}", "warn")
+                self.reply_busy = False
 
     @rx.event(background=True)
     async def start_apply(self):
@@ -266,4 +275,10 @@ class BossState(rx.State):
             async with self:
                 self.boss_state = "出错"
                 self._push_log(str(exc), "warn")
+                self.busy = False
+        except Exception as exc:
+            logger.exception("自动投递出错")
+            async with self:
+                self.boss_state = "出错"
+                self._push_log(f"自动投递出错：{exc!r}", "warn")
                 self.busy = False
