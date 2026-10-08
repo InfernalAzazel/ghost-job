@@ -96,7 +96,7 @@ class SearchPage(FakePage):
 
 def _scraper(page: SearchPage) -> JobScraper:
     session = FakeSession()
-    session.page = AsyncMock(return_value=page)  # type: ignore[method-assign]
+    session.page = AsyncMock(return_value=page)
     scraper = JobScraper(session)  # type: ignore[arg-type]
     scraper._scrape_cards = AsyncMock(return_value=[])  # type: ignore[method-assign]
     scraper._load_more = AsyncMock()  # type: ignore[method-assign]
