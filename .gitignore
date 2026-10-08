@@ -7,6 +7,7 @@ assets/external/
 .superpowers/
 docs/
 .web/
+uploaded_files/
 # reflex-desktop Tauri scaffolds (generated)
 tauri/
 tauri-dev/
