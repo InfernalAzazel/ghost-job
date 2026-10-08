@@ -8,6 +8,7 @@ import random
 import re
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from patchright.async_api import Error as PlaywrightError
 from patchright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -158,7 +159,7 @@ class JobScraper:
     # 列表卡片
     CARD = "li.job-card-box, .job-card-wrapper"
     # 登录弹层
-    LOGIN = ".login-dialog-wrap"
+    LOGIN = ".login-dialog-wrap, .sign-wrap"
     # 右侧详情里的沟通按钮（未沟通过显示「立即沟通」，沟通过显示「继续沟通」）
     CHAT_BTN = ".job-detail-box .op-btn-chat, .job-detail-container .op-btn-chat"
     # 点「立即沟通」后弹窗里的「留在此页」
@@ -211,7 +212,7 @@ class JobScraper:
         传了 ``reviewer`` 时，点开详情后再做一次 AI 复核，不通过的不投递。
         看过的岗位连同是否合适、原因一起入库，下次直接跳过；每天最多投递 ``DAILY_LIMIT`` 次。
         过程日志交给 ``on_log``（不打印到终端）。
-        返回 (职位列表, 状态)；状态为 done / stopped / need_login / limit。
+        返回 (职位列表, 状态)；状态为 done / stopped / need_login / load_failed / limit。
         """
         self._stop.clear()
         self._pace = pace or PaceProfile()
@@ -231,6 +232,8 @@ class JobScraper:
         jobs: list[Job] = []
         try:
             for i, (city, url) in enumerate(targets):
+                if self._stop.is_set():
+                    return jobs, self._end_state()
                 if i:
                     await self._log(f"{targets[i - 1][0]}的岗位已看完，切换到{city}")
                 else:
@@ -250,25 +253,76 @@ class JobScraper:
         on_job: Callable[[Job], Awaitable[None]] | None,
     ) -> str:
         """投递一个城市的搜索结果，投递成功的追加进 ``jobs``；返回状态。"""
+        if self._stop.is_set():
+            return self._end_state()
         self._listed.clear()
-        await page.goto(url, wait_until="domcontentloaded")
         try:
-            await page.wait_for_selector(self.CARD, timeout=20_000)
+            if not await self._wait_page_action(
+                page.goto(url, wait_until="domcontentloaded")
+            ):
+                return self._end_state()
+            if await self._needs_login(page):
+                return "need_login"
+            if not await self._wait_page_action(
+                page.wait_for_selector(self.CARD, timeout=20_000)
+            ):
+                return self._end_state()
         except PlaywrightTimeoutError:
-            need_login = await page.locator(self.LOGIN).is_visible()
-            return "need_login" if need_login else "done"
+            if self._stop.is_set():
+                return self._end_state()
+            return "need_login" if await self._needs_login(page) else "load_failed"
+        if self._stop.is_set():
+            return self._end_state()
+        if await self._needs_login(page):
+            return "need_login"
 
         done: set[str] = set()
         idle = 0
         for _ in range(self.MAX_SCROLLS):
             seen = len(done)
             jobs.extend(await self._scrape_cards(page, done, on_job))
+            if self._stop.is_set():
+                return self._end_state()
+            if await self._needs_login(page):
+                return "need_login"
             idle = 0 if len(done) > seen else idle + 1
             if self._stop.is_set() or idle >= 2:
                 break
             await self._load_more(page)
             await self._pause(self._pace.scroll)
         return self._end_state()
+
+    async def _needs_login(self, page: Page) -> bool:
+        """登录弹层、整页登录或安全验证均需用户处理，不继续切换城市。"""
+        path = urlparse(page.url).path.lower()
+        if "login" in page.url.lower() or path.rstrip("/") == "/web/user":
+            return True
+        if any(
+            marker in path
+            for marker in ("/passport", "/verify", "/captcha", "security-check")
+        ):
+            return True
+        login = page.locator(self.LOGIN)
+        for index in range(await login.count()):
+            if await login.nth(index).is_visible():
+                return True
+        return False
+
+    async def _wait_page_action(self, action: Awaitable[Any]) -> bool:
+        """导航或列表等待可被停止打断；退出时回收任务并传播页面异常。"""
+        operation = asyncio.ensure_future(action)
+        stopped = asyncio.create_task(self._stop.wait())
+        try:
+            await asyncio.wait((operation, stopped), return_when=asyncio.FIRST_COMPLETED)
+            if self._stop.is_set():
+                return False
+            await operation
+            return True
+        finally:
+            for task in (operation, stopped):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(operation, stopped, return_exceptions=True)
 
     async def _scrape_cards(
         self,
@@ -318,6 +372,8 @@ class JobScraper:
                     continue
 
             await self._pause(self._pace.read)
+            if self._stop.is_set():
+                break
             status = await self._apply(page)
             if status == self.CHATTED:
                 JobRow.record(job, reason=reason, score=score)

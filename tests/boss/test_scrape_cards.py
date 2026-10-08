@@ -108,3 +108,30 @@ def test_scrape_cards_records_every_decision(tmp_db):
     assert JobRow.get_dict("err") is None
     ok = JobRow.get_dict("ok")
     assert (ok["result"], ok["reason"]) == ("已投递", "Agent 方向吻合")
+
+
+def test_stop_during_read_pause_does_not_send_application(tmp_db):
+    scraper = JobScraper(session=None)  # type: ignore[arg-type]
+    job = Job(job_id="stopped", title="Java 实习生", company="某公司")
+    applied: list[bool] = []
+
+    async def listed(_card, _index):
+        return job
+
+    async def detail(_page, _card, listed_job):
+        return listed_job
+
+    async def pause(_span):
+        scraper.request_stop()
+
+    async def apply(_page):
+        applied.append(True)
+        return ""
+
+    scraper._listed_job_for = listed  # type: ignore[method-assign]
+    scraper._open_detail = detail  # type: ignore[method-assign]
+    scraper._pause = pause  # type: ignore[method-assign]
+    scraper._apply = apply  # type: ignore[method-assign]
+    batch = asyncio.run(scraper._scrape_cards(FakePage(1), set(), None))
+    assert batch == [] and applied == []
+    assert JobRow.get_dict("stopped") is None
