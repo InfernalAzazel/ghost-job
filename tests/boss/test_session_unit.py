@@ -11,7 +11,7 @@ _INSTALL_HINT = "无法启动本机 Chrome（channel=chrome），请确认已安
 
 
 def test_default_profile_dir_under_home(monkeypatch, tmp_path: Path):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     d = BossSession.default_profile_dir()
     assert d == tmp_path / ".ghost-job" / "chrome-profile"
 

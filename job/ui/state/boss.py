@@ -32,6 +32,7 @@ _STATUS = {
     "done": "已完成",
     "stopped": "已停止",
     "need_login": "需要登录",
+    "load_failed": "页面加载失败",
     "limit": "今日已达上限",
 }
 # 投递结束状态 → 日志文案
@@ -39,6 +40,7 @@ _FINISHED = {
     "done": "所选城市的岗位都看完了",
     "stopped": "已停止投递",
     "need_login": "需要登录 BOSS，请在浏览器里登录后重新开始",
+    "load_failed": "职位列表未加载，已保留当前页面；请检查网络或完成页面验证后重新开始",
     "limit": "今日投递次数已用完，明天再来",
 }
 # 日志最多保留条数
@@ -268,7 +270,7 @@ class BossState(rx.State):
                     f"{_FINISHED.get(state, state)}：本次投递 {self.session_count} 条，"
                     f"重复 {self.dup_count} 条，跳过 {self.skip_count} 条，"
                     f"累计投递 {self.stored_count} 条",
-                    "warn" if state in ("need_login", "limit") else "info",
+                    "warn" if state in ("need_login", "load_failed", "limit") else "info",
                 )
                 self.busy = False
         except (RuntimeError, PlaywrightError, SQLAlchemyError) as exc:
