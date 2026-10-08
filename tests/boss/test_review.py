@@ -7,7 +7,13 @@ import json
 
 import pytest
 from pydantic_ai.exceptions import AgentRunError, ModelHTTPError
-from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelResponse,
+    TextPart,
+    UserPromptPart,
+)
+from pydantic_ai.models import Model
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -33,7 +39,9 @@ def _reviewer_answering(
     def answer(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         assert not info.output_tools, "不能走工具调用，DeepSeek 思考模式会拒绝"
         if prompts is not None:
-            prompts.append(str(messages[-1].parts[-1].content))
+            part = messages[-1].parts[-1]
+            assert isinstance(part, UserPromptPart)
+            prompts.append(str(part.content))
         verdict = {"match": match, "reason": reason, "score": score}
         return ModelResponse(parts=[TextPart(json.dumps(verdict, ensure_ascii=False))])
 
@@ -81,7 +89,9 @@ def test_both_checks_in_one_prompt():
 
 def test_agent_uses_configured_model():
     reviewer = JobReviewer(requirement="只投 Agent", llm=LLM)
-    assert reviewer.agent.model.model_name == "deepseek-v4-pro"
+    model = reviewer.agent.model
+    assert isinstance(model, Model)
+    assert model.model_name == "deepseek-v4-pro"
 
 
 def test_match_passes_and_prompt_has_requirement():
@@ -112,8 +122,11 @@ def test_resume_match_returns_score():
 
 def test_min_score_from_config_only_when_enabled():
     config = {"resume_match": True, "resume_text": "Python", "min_score": 70}
-    assert JobReviewer.from_config(config, LLM).min_score is None
+    reviewer = JobReviewer.from_config(config, LLM)
+    assert reviewer is not None
+    assert reviewer.min_score is None
     reviewer = JobReviewer.from_config({**config, "score_filter": True}, LLM)
+    assert reviewer is not None
     assert reviewer.min_score == 70
     assert reviewer.checks == ["简历技术匹配", "匹配度 ≥70"]
 

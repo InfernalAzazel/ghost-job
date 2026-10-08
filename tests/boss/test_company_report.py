@@ -38,7 +38,9 @@ def test_pdf_contains_all_sections():
         "小微企业",
     ):
         assert part in text
-    links = [a.get_object()["/A"]["/URI"] for p in pdf.pages for a in p["/Annots"]]
+    links = [
+        a.get_object()["/A"]["/URI"] for p in pdf.pages for a in p.annotations or []
+    ]
     assert links == ["https://example.com/a?x=1&y=2", "https://example.com/b"]
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic_ai.exceptions import UnexpectedModelBehavior
@@ -14,6 +15,14 @@ from job.boss.jobs import Job, JobScraper
 from job.boss.review import Verdict
 from job.models import init_db, reset_engine
 from job.models.job import JobRow
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    from patchright.async_api import Locator, Page
+
+    from job.boss.review import JobReviewer
+    from job.boss.session import BossSession
 
 
 class FakeCards:
@@ -33,6 +42,24 @@ class FakePage:
 
     def locator(self, _selector: str) -> FakeCards:
         return self.cards
+
+
+def _as_page(page: object) -> Page:
+    return cast("Page", page)
+
+
+def _as_boss(session: object) -> BossSession:
+    return cast("BossSession", session)
+
+
+def _as_reviewer(reviewer: object) -> JobReviewer:
+    return cast("JobReviewer", reviewer)
+
+
+def _row(uid: str) -> dict[str, Any]:
+    row = JobRow.get_dict(uid)
+    assert row is not None
+    return row
 
 
 class FakeReviewer:
@@ -69,69 +96,77 @@ def test_scrape_cards_records_every_decision(tmp_db):
         suitable=False,
         reason="外包公司",
     )
-    scraper = JobScraper(session=None)  # type: ignore[arg-type]
+    scraper = JobScraper(session=_as_boss(None))
     scraper._keywords = KeywordFilter(exclude=["实习"])
-    scraper._reviewer = FakeReviewer()  # type: ignore[assignment]
+    scraper._reviewer = _as_reviewer(FakeReviewer())
     applied: list[int] = []
     logs: list[str] = []
 
-    async def listed(_card, i: int) -> Job:
-        return jobs[i]
+    async def listed(card: Locator, index: int) -> Job | None:
+        del card
+        return jobs[index]
 
-    async def detail(_page, _card, job: Job) -> Job:
+    async def detail(page: Page, card: Locator, job: Job) -> Job:
+        del page, card
         return job
 
-    async def apply(_page) -> str:
+    async def apply(page: Page) -> str:
+        del page
         applied.append(1)
         return ""
 
-    async def pause(_span) -> None:
-        pass
+    async def pause(span: tuple[float, float]) -> None:
+        del span
 
     async def on_log(_level: str, text: str) -> None:
         logs.append(text)
 
-    scraper._listed_job_for = listed  # type: ignore[method-assign]
-    scraper._open_detail = detail  # type: ignore[method-assign]
-    scraper._apply = apply  # type: ignore[method-assign]
-    scraper._pause = pause  # type: ignore[method-assign]
+    scraper._listed_job_for = listed
+    scraper._open_detail = detail
+    scraper._apply = apply
+    scraper._pause = pause
     scraper._on_log = on_log
 
-    batch = asyncio.run(scraper._scrape_cards(FakePage(len(jobs)), set(), None))
+    page = _as_page(FakePage(len(jobs)))
+    batch = asyncio.run(scraper._scrape_cards(page, set(), None))
 
     assert [j.job_id for j in batch] == ["ok"] and len(applied) == 1
     assert JobRow.get_dict("dup") is None
     assert any("看过，不合适：外包公司" in line for line in logs)
-    assert JobRow.get_dict("kw")["result"] == "不合适"
-    assert JobRow.get_dict("kw")["reason"] == "职位名含排除词"
-    assert JobRow.get_dict("sale")["reason"] == "销售岗"
+    assert _row("kw")["result"] == "不合适"
+    assert _row("kw")["reason"] == "职位名含排除词"
+    assert _row("sale")["reason"] == "销售岗"
     assert JobRow.get_dict("err") is None
-    ok = JobRow.get_dict("ok")
+    ok = _row("ok")
     assert (ok["result"], ok["reason"]) == ("已投递", "Agent 方向吻合")
 
 
 def test_stop_during_read_pause_does_not_send_application(tmp_db):
-    scraper = JobScraper(session=None)  # type: ignore[arg-type]
+    scraper = JobScraper(session=_as_boss(None))
     job = Job(job_id="stopped", title="Java 实习生", company="某公司")
     applied: list[bool] = []
 
-    async def listed(_card, _index):
+    async def listed(card: Locator, index: int) -> Job | None:
+        del card, index
         return job
 
-    async def detail(_page, _card, listed_job):
-        return listed_job
+    async def detail(page: Page, card: Locator, job: Job) -> Job:
+        del page, card
+        return job
 
-    async def pause(_span):
+    async def pause(span: tuple[float, float]) -> None:
+        del span
         scraper.request_stop()
 
-    async def apply(_page):
+    async def apply(page: Page) -> str:
+        del page
         applied.append(True)
         return ""
 
-    scraper._listed_job_for = listed  # type: ignore[method-assign]
-    scraper._open_detail = detail  # type: ignore[method-assign]
-    scraper._pause = pause  # type: ignore[method-assign]
-    scraper._apply = apply  # type: ignore[method-assign]
-    batch = asyncio.run(scraper._scrape_cards(FakePage(1), set(), None))
+    scraper._listed_job_for = listed
+    scraper._open_detail = detail
+    scraper._pause = pause
+    scraper._apply = apply
+    batch = asyncio.run(scraper._scrape_cards(_as_page(FakePage(1)), set(), None))
     assert batch == [] and applied == []
     assert JobRow.get_dict("stopped") is None

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
@@ -27,6 +28,12 @@ from job.models.chat import ChatMessage, ChatMessageRow, ChatStatusRow
 from job.models.job import JobRow
 from job.models.setting import LlmSettings
 
+if TYPE_CHECKING:
+    from patchright.async_api import Page
+
+    from job.boss.session import BossSession
+
+LAST_MESSAGE = {"fromId": 1001, "toId": 2002, "msgId": 9}
 FRIEND = {
     "encryptBossId": "boss-1",
     "uid": 1001,
@@ -35,7 +42,7 @@ FRIEND = {
     "brandName": "示例科技",
     "encryptJobId": "job-1",
     "unreadMsgCount": 2,
-    "lastMessageInfo": {"fromId": 1001, "toId": 2002, "msgId": 9},
+    "lastMessageInfo": LAST_MESSAGE,
 }
 BOSS_DATA = {
     "zpData": {
@@ -57,6 +64,23 @@ BOSS_DATA = {
 }
 
 
+class Conversation(TypedDict):
+    job_uid: str
+    boss_id: str
+    hr_name: str
+
+
+def _as_page(page: object) -> Page:
+    return cast("Page", page)
+
+
+def _as_boss(session: object) -> BossSession:
+    return cast("BossSession", session)
+
+
+NO_PAGE = _as_page(None)
+
+
 @pytest.fixture()
 def tmp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(models_pkg, "DB_PATH", tmp_path / "test.db")
@@ -73,7 +97,7 @@ def test_friend_waiting_when_hr_sent_last():
     assert friend.waiting
     assert Friend.model_validate({**FRIEND, "unreadMsgCount": 0}).waiting
 
-    mine = {**FRIEND["lastMessageInfo"], "fromId": 2002}
+    mine = {**LAST_MESSAGE, "fromId": 2002}
     assert not Friend.model_validate({**FRIEND, "lastMessageInfo": mine}).waiting
 
 
@@ -103,7 +127,11 @@ def test_record_new_skips_known_messages(tmp_db):
         ChatMessage(mid="1", from_hr=False, text="您好"),
         ChatMessage(mid="2", from_hr=True, text="在吗"),
     ]
-    kwargs = {"job_uid": "job-1", "boss_id": "boss-1", "hr_name": "王女士"}
+    kwargs: Conversation = {
+        "job_uid": "job-1",
+        "boss_id": "boss-1",
+        "hr_name": "王女士",
+    }
     assert [m.mid for m in ChatMessageRow.record_new(first, **kwargs)] == ["1", "2"]
 
     more = [*first, ChatMessage(mid="3", from_hr=False, text="在的")]
@@ -118,7 +146,7 @@ def test_record_new_skips_known_messages(tmp_db):
 
 
 def test_record_new_fills_empty_card_text(tmp_db):
-    kwargs = {"job_uid": "", "boss_id": "boss-1", "hr_name": "钟女士"}
+    kwargs: Conversation = {"job_uid": "", "boss_id": "boss-1", "hr_name": "钟女士"}
     ChatMessageRow.record_new([ChatMessage(mid="1", from_hr=True, text="")], **kwargs)
 
     card = ChatMessage(mid="1", from_hr=True, text="我想要一份您的附件简历，您是否同意")
@@ -127,7 +155,11 @@ def test_record_new_fills_empty_card_text(tmp_db):
 
 
 def test_record_new_replaces_temporary_mid_of_auto_reply(tmp_db):
-    kwargs = {"job_uid": "job-1", "boss_id": "boss-1", "hr_name": "林女士"}
+    kwargs: Conversation = {
+        "job_uid": "job-1",
+        "boss_id": "boss-1",
+        "hr_name": "林女士",
+    }
     hr = ChatMessage(mid="1", from_hr=True, text="发下简历")
     ChatMessageRow.record_new(
         [hr, ChatMessage(mid="temp", from_hr=False, text="简历已发您")],
@@ -333,13 +365,14 @@ class FakeReviewer:
 
 
 def _responder(**kwargs) -> tuple[ChatResponder, list[tuple[str, str]]]:
-    responder = ChatResponder(session=None)  # type: ignore[arg-type]
+    responder = ChatResponder(session=_as_boss(None))
     logs: list[tuple[str, str]] = []
 
     async def on_log(level: str, text: str) -> None:
         logs.append((level, text))
 
-    async def description(_page, _job) -> str:
+    async def description(page: Page, job: Job) -> str:
+        del page, job
         return "负责大模型应用落地"
 
     responder._on_log = on_log
@@ -354,10 +387,11 @@ def test_new_job_from_hr_is_reviewed_and_recorded(tmp_db):
         reviewer=FakeReviewer(Verdict(match=True, reason="方向吻合", score=85))
     )
     job = job_from_boss_data(BOSS_DATA)
-    verdict, job = asyncio.run(responder._judge(None, job, "job-1"))
+    verdict, job = asyncio.run(responder._judge(NO_PAGE, job, "job-1"))
 
     assert verdict == "合适（方向吻合）" and job.description == "负责大模型应用落地"
     row = JobRow.get_dict("job-1")
+    assert row is not None
     assert (
         row["suitable"]
         and row["reason"] == "方向吻合"
@@ -370,10 +404,11 @@ def test_new_job_from_hr_is_reviewed_and_recorded(tmp_db):
 def test_new_job_rejected_by_keywords(tmp_db):
     responder, logs = _responder(keywords=KeywordFilter(exclude_companies=["示例"]))
     verdict, _job = asyncio.run(
-        responder._judge(None, job_from_boss_data(BOSS_DATA), "job-1")
+        responder._judge(NO_PAGE, job_from_boss_data(BOSS_DATA), "job-1")
     )
     assert verdict == "不合适（公司名含排除词）"
-    assert not JobRow.get_dict("job-1")["suitable"]
+    row = JobRow.get_dict("job-1")
+    assert row is not None and not row["suitable"]
     assert logs[-1][0] == "skip"
 
 
@@ -390,7 +425,7 @@ def test_known_job_keeps_previous_verdict(tmp_db):
     )
     responder, logs = _responder()
     verdict, job = asyncio.run(
-        responder._judge(None, job_from_boss_data(BOSS_DATA), "job-1")
+        responder._judge(NO_PAGE, job_from_boss_data(BOSS_DATA), "job-1")
     )
     assert verdict == "不合适（外包公司）" and job.description == "原描述"
     assert logs == []
@@ -405,10 +440,11 @@ def test_known_job_without_description_is_filled(tmp_db):
     )
     responder, _logs = _responder()
     verdict, job = asyncio.run(
-        responder._judge(None, job_from_boss_data(BOSS_DATA), "job-1")
+        responder._judge(NO_PAGE, job_from_boss_data(BOSS_DATA), "job-1")
     )
     assert verdict == "合适（可投）" and job.description == "负责大模型应用落地"
     row = JobRow.get_dict("job-1")
+    assert row is not None
     assert row["description"] == "负责大模型应用落地"
     assert row["suitable"] and row["reason"] == "可投" and row["matchStatus"] == "80 分"
     assert row["result"] == "已投递"
@@ -420,20 +456,24 @@ def _sending_responder(
     responder, logs = _responder()
     sent: list[str] = []
 
-    async def send(_page, text: str) -> bool:
+    async def send(page: Page, text: str) -> bool:
+        del page
         sent.append(text)
         return True
 
-    async def accept_resume_request(_page) -> bool:
+    async def accept_resume_request(page: Page) -> bool:
+        del page
         if request_pending:
             sent.append("<同意>")
         return request_pending
 
-    async def send_resume(_page) -> bool:
+    async def send_resume(page: Page) -> bool:
+        del page
         sent.append("<简历>")
         return resume_ok
 
-    async def read(_page) -> list[ChatMessage]:
+    async def read(page: Page) -> list[ChatMessage]:
+        del page
         return [
             ChatMessage(mid=f"me-{i}", from_hr=False, text=t)
             for i, t in enumerate(sent)
@@ -451,7 +491,7 @@ def test_hr_rejection_is_marked_without_reply(tmp_db):
     friend = Friend.model_validate(FRIEND)
     decision = ChatDecision(outcome="hr_rejected")
     asyncio.run(
-        responder._apply(None, friend, "job-1", decision, "暂时不符合我们的需求")
+        responder._apply(NO_PAGE, friend, "job-1", decision, "暂时不符合我们的需求")
     )
     assert sent == []
     assert ChatStatusRow.statuses() == {"boss-1": "hr_rejected"}
@@ -462,7 +502,7 @@ def test_decline_is_sent_then_marked(tmp_db):
     responder, logs, sent = _sending_responder()
     friend = Friend.model_validate(FRIEND)
     decision = ChatDecision(outcome="declined", reply="感谢，这个岗位暂不考虑")
-    asyncio.run(responder._apply(None, friend, "job-1", decision, "考虑吗"))
+    asyncio.run(responder._apply(NO_PAGE, friend, "job-1", decision, "考虑吗"))
     assert sent == ["感谢，这个岗位暂不考虑"]
     assert ChatStatusRow.statuses() == {"boss-1": "declined"}
     assert logs[-1][0] == "reply"
@@ -473,7 +513,7 @@ def test_continue_reply_clears_mark(tmp_db):
     responder, _logs, sent = _sending_responder()
     friend = Friend.model_validate(FRIEND)
     decision = ChatDecision(outcome="continue", reply="好的，这个岗位可以聊聊")
-    asyncio.run(responder._apply(None, friend, "job-1", decision, "换个岗位看看？"))
+    asyncio.run(responder._apply(NO_PAGE, friend, "job-1", decision, "换个岗位看看？"))
     assert sent == ["好的，这个岗位可以聊聊"]
     assert ChatStatusRow.statuses() == {}
 
@@ -484,7 +524,7 @@ def test_resume_is_sent_after_reply_when_hr_asks(tmp_db):
     decision = ChatDecision(
         outcome="continue", reply="好的，简历发您了", send_resume=True
     )
-    asyncio.run(responder._apply(None, friend, "job-1", decision, "方便发份简历吗"))
+    asyncio.run(responder._apply(NO_PAGE, friend, "job-1", decision, "方便发份简历吗"))
     assert sent == ["好的，简历发您了", "<简历>"]
     assert any(level == "reply" and "已发送附件简历" in text for level, text in logs)
 
@@ -495,7 +535,7 @@ def test_hr_resume_request_is_accepted_instead_of_sending(tmp_db):
     decision = ChatDecision(outcome="continue", reply="好的，已同意", send_resume=True)
     asyncio.run(
         responder._apply(
-            None, friend, "job-1", decision, "我想要一份您的附件简历，您是否同意"
+            NO_PAGE, friend, "job-1", decision, "我想要一份您的附件简历，您是否同意"
         )
     )
     assert sent == ["好的，已同意", "<同意>"]
@@ -508,7 +548,7 @@ def test_resume_failure_asks_for_manual_send(tmp_db):
     responder, logs, sent = _sending_responder(resume_ok=False)
     friend = Friend.model_validate(FRIEND)
     decision = ChatDecision(outcome="continue", reply="好的", send_resume=True)
-    asyncio.run(responder._apply(None, friend, "job-1", decision, "发下简历"))
+    asyncio.run(responder._apply(NO_PAGE, friend, "job-1", decision, "发下简历"))
     assert sent == ["好的", "<简历>"]
     assert any(level == "warn" and "手动发送" in text for level, text in logs)
 
@@ -520,7 +560,7 @@ def test_interview_invitation_is_marked(tmp_db):
         outcome="continue", reply="好的，周三下午可以", interview=True
     )
     asyncio.run(
-        responder._apply(None, friend, "job-1", decision, "周三下午来面试可以吗")
+        responder._apply(NO_PAGE, friend, "job-1", decision, "周三下午来面试可以吗")
     )
     assert ChatStatusRow.statuses() == {"boss-1": "invited"}
     assert any(level == "info" and "已标记有面试" in text for level, text in logs)
@@ -532,7 +572,7 @@ def test_interview_detection_keeps_manual_status(tmp_db):
     friend = Friend.model_validate(FRIEND)
     decision = ChatDecision(outcome="hr_rejected", interview=True)
     asyncio.run(
-        responder._apply(None, friend, "job-1", decision, "面试没通过，不好意思")
+        responder._apply(NO_PAGE, friend, "job-1", decision, "面试没通过，不好意思")
     )
     assert ChatStatusRow.statuses() == {"boss-1": "done"}
     assert not any("已标记有面试" in text for _level, text in logs)
@@ -543,7 +583,7 @@ def test_resume_not_sent_by_default(tmp_db):
     friend = Friend.model_validate(FRIEND)
     asyncio.run(
         responder._apply(
-            None,
+            NO_PAGE,
             friend,
             "job-1",
             ChatDecision(outcome="continue", reply="好的"),
@@ -570,7 +610,8 @@ def test_reopen_retries_until_network_recovers():
     results = iter([None, None, True])
     waits: list[float] = []
 
-    async def open_page(_page) -> bool | None:
+    async def open_page(page: Page) -> bool | None:
+        del page
         return next(results)
 
     async def sleep(seconds: float) -> None:
@@ -579,7 +620,7 @@ def test_reopen_retries_until_network_recovers():
     responder.open_page = open_page  # type: ignore[method-assign]
     responder._sleep = sleep  # type: ignore[method-assign]
     page = TabPage()
-    assert asyncio.run(responder._reopen(page)) is page  # type: ignore[arg-type]
+    assert asyncio.run(responder._reopen(_as_page(page))) is page
     assert waits == [ChatResponder.RETRY] * 2
     assert [level for level, _text in logs] == ["warn", "warn"]
 
@@ -587,26 +628,29 @@ def test_reopen_retries_until_network_recovers():
 def test_reopen_stops_waiting_when_stopped():
     responder, _logs = _responder()
 
-    async def open_page(_page) -> bool | None:
+    async def open_page(page: Page) -> bool | None:
+        del page
         return None
 
-    async def sleep(_seconds: float) -> None:
+    async def sleep(seconds: float) -> None:
+        del seconds
         responder.request_stop()
 
     responder.open_page = open_page  # type: ignore[method-assign]
     responder._sleep = sleep  # type: ignore[method-assign]
     page = TabPage()
-    assert asyncio.run(responder._reopen(page)) is page  # type: ignore[arg-type]
+    assert asyncio.run(responder._reopen(_as_page(page))) is page
 
 
 def test_reopen_need_login_returns_none():
     responder, _logs = _responder()
 
-    async def open_page(_page) -> bool | None:
+    async def open_page(page: Page) -> bool | None:
+        del page
         return False
 
     responder.open_page = open_page  # type: ignore[method-assign]
-    assert asyncio.run(responder._reopen(TabPage())) is None  # type: ignore[arg-type]
+    assert asyncio.run(responder._reopen(_as_page(TabPage()))) is None
 
 
 class TabPage:
@@ -633,15 +677,15 @@ class TabSession:
 def test_reopen_replaces_closed_tab():
     responder, logs = _responder()
     session = TabSession(is_open=True)
-    responder.session = session  # type: ignore[assignment]
-    opened: list[TabPage] = []
+    responder.session = _as_boss(session)
+    opened: list[object] = []
 
-    async def open_page(page) -> bool | None:
+    async def open_page(page: Page) -> bool | None:
         opened.append(page)
         return True
 
     responder.open_page = open_page  # type: ignore[method-assign]
-    page = asyncio.run(responder._reopen(TabPage(closed=True)))  # type: ignore[arg-type]
+    page = asyncio.run(responder._reopen(_as_page(TabPage(closed=True))))
     assert page is session.pages[0]
     assert opened == session.pages
     assert logs == [("warn", "聊天页被关闭，已重新打开")]
@@ -649,9 +693,9 @@ def test_reopen_replaces_closed_tab():
 
 def test_reopen_raises_when_browser_closed():
     responder, _logs = _responder()
-    responder.session = TabSession(is_open=False)  # type: ignore[assignment]
+    responder.session = _as_boss(TabSession(is_open=False))
     with pytest.raises(BrowserClosed):
-        asyncio.run(responder._reopen(TabPage(closed=True)))  # type: ignore[arg-type]
+        asyncio.run(responder._reopen(_as_page(TabPage(closed=True))))
 
 
 def test_parse_friends_skips_invalid():

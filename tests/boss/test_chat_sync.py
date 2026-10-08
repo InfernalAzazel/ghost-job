@@ -92,14 +92,14 @@ def test_history_messages_keep_boss_time_and_order(tmp_db):
 
 
 def test_page_message_gets_boss_time_from_history(tmp_db):
-    kwargs = {"job_uid": "", "boss_id": "boss-1", "hr_name": "刘女士"}
-    ChatMessageRow.record_new(
-        [ChatMessage(mid="1", from_hr=True, text="您好")], **kwargs
-    )
+    def record(message: ChatMessage) -> None:
+        ChatMessageRow.record_new(
+            [message], job_uid="", boss_id="boss-1", hr_name="刘女士"
+        )
+
+    record(ChatMessage(mid="1", from_hr=True, text="您好"))
     sent = datetime(2026, 9, 1, 2, 0, tzinfo=UTC)
-    ChatMessageRow.record_new(
-        [ChatMessage(mid="1", from_hr=True, text="您好", sent_at=sent)], **kwargs
-    )
+    record(ChatMessage(mid="1", from_hr=True, text="您好", sent_at=sent))
 
     [row] = ChatMessageRow.list_for_boss("boss-1")
     assert row["time"] == sent.astimezone().strftime("%m-%d %H:%M")

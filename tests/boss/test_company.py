@@ -98,7 +98,10 @@ def test_search_drops_platform_template_pages():
             {
                 "title": f"{name} - 失信人名单 - 爱企查",
                 "href": "https://aiqicha.baidu.com/company_discredit_19092262656847",
-                "body": f"爱企查为您提供{name}2025年企业失信人信息查询,包括失信人立案日期、案号",
+                "body": (
+                    f"爱企查为您提供{name}2025年企业失信人信息查询,"
+                    "包括失信人立案日期、案号"
+                ),
             },
             {
                 "title": f"{name} - 企查查",

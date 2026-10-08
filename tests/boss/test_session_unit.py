@@ -1,11 +1,17 @@
 """BossSession 配置单元测试。"""
 
+from __future__ import annotations
+
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from patchright.async_api import Error as PlaywrightError
 
 from job.boss.session import BossSession
+
+if TYPE_CHECKING:
+    from patchright.async_api import BrowserContext, Page
 
 _INSTALL_HINT = "无法启动本机 Chrome（channel=chrome），请确认已安装 Google Chrome。"
 
@@ -51,7 +57,8 @@ def test_launch_error_spawn_failure_is_not_profile_in_use(tmp_path: Path):
     exc = PlaywrightError(
         "BrowserType.launch_persistent_context: spawn UNKNOWN\n"
         "Call log:\n"
-        f"  - <launching> {chrome} --disable-features=BlockOriginHeaderModificationOnRedirect "
+        f"  - <launching> {chrome} "
+        "--disable-features=BlockOriginHeaderModificationOnRedirect "
         f"--user-data-dir={tmp_path} --remote-debugging-pipe about:blank\n"
     )
     assert session._launch_error(exc) == f"启动 Chrome 失败：spawn UNKNOWN（{chrome}）"
@@ -91,11 +98,11 @@ def test_windows_without_usable_chrome_falls_back_to_channel(
 
 def test_closed_browser_is_not_reused(tmp_path: Path):
     session = BossSession(user_data_dir=tmp_path)
-    context, stale = object(), object()
-    session._context = context  # type: ignore[assignment]
-    session._on_closed(stale)  # type: ignore[arg-type]
+    context, stale = _as_context(object()), _as_context(object())
+    session._context = context
+    session._on_closed(stale)
     assert session.is_open
-    session._on_closed(context)  # type: ignore[arg-type]
+    session._on_closed(context)
     assert not session.is_open
 
 
@@ -117,13 +124,21 @@ class FakeContext:
         return self.pages[-1]
 
 
+def _as_context(context: object) -> BrowserContext:
+    return cast("BrowserContext", context)
+
+
+def _as_page(page: object) -> Page:
+    return cast("Page", page)
+
+
 def test_job_page_never_takes_chat_tab(tmp_path: Path):
     session = BossSession(user_data_dir=tmp_path)
     context = FakeContext()
-    session._context = context  # type: ignore[assignment]
-    session._job_page = context.pages[0]  # type: ignore[assignment]
-    first = asyncio.run(session.page())
-    assert first is context.pages[0]
+    first = context.pages[0]
+    session._context = _as_context(context)
+    session._job_page = _as_page(first)
+    assert asyncio.run(session.page()) is first
 
     chat = asyncio.run(context.new_page())  # 自动回复自己开的聊天页
     first.closed = True
