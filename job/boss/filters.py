@@ -245,11 +245,56 @@ class Activity:
         5: "5月内活跃",
         6: "近半年活跃",
     }
+    # 界面开关打开时的默认档位
+    DEFAULT_LEVEL: ClassVar[str] = "本周活跃"
 
     @classmethod
     def labels(cls) -> list[str]:
         """界面上的全部档位（按活跃度从新到旧）。"""
         return [cls.ONLINE, *(name for name, _ in cls.GROUPS)]
+
+    @classmethod
+    def rank(cls, level: str) -> int:
+        """档位排名：越活跃越小，「在线」为 0；认不出的档排在所有档位之后。"""
+        labels = cls.labels()
+        return labels.index(level) if level in labels else len(labels)
+
+    @classmethod
+    def at_least(cls, level: str) -> tuple[str, ...]:
+        """``level`` 及其更活跃的全部档位（含「在线」）；认不出时返回空。"""
+        labels = cls.labels()
+        if level not in labels:
+            return ()
+        return tuple(labels[: labels.index(level) + 1])
+
+    @classmethod
+    def wordings_at_least(cls, level: str) -> tuple[str, ...]:
+        """``level`` 及其更活跃档位的全部接口措辞。
+
+        「在线」没有入库过（它是投递当时的实时状态），所以排除掉。
+
+        只覆盖 ``GROUPS`` 里登记过的措辞：岗位表存的是接口原文，用 SQL 按这里逐字匹配时，
+        没登记过的写法（如「3分钟前在线」「3个月零几天前活跃」）和带私用区数字的原文
+        都会漏掉。投递链路走 ``of()`` 归一化所以不受影响，两边的这处差异是已知取舍：
+        宁可让极少数奇怪写法在岗位管理里查不到，也不在 SQL 里做模糊匹配误伤正常档位。
+        """
+        out: list[str] = []
+        for name in cls.at_least(level):
+            if name != cls.ONLINE:
+                out.extend(cls.wordings(name))
+        return tuple(out)
+
+    @classmethod
+    def index(cls, level: str) -> int:
+        """档位 → 界面索引；认不出的档落到默认档的索引。"""
+        labels = cls.labels()
+        return labels.index(level) if level in labels else labels.index(cls.DEFAULT_LEVEL)
+
+    @classmethod
+    def level_at(cls, index: int) -> str:
+        """界面索引 → 档位；越界时夹到有效范围。"""
+        labels = cls.labels()
+        return labels[max(0, min(index, len(labels) - 1))]
 
     @classmethod
     def wordings(cls, level: str) -> tuple[str, ...]:
@@ -306,24 +351,25 @@ class Activity:
 
 
 class ActivityFilter(BaseModel):
-    """本地活跃度过滤（BOSS URL 不支持）：按详情接口给的活跃度判断。"""
+    """本地活跃度阈值过滤（BOSS URL 不支持）：只投不低于该档位的岗位。"""
 
-    # 只看这些活跃档位（在线的岗位也算命中）；空表示不限
-    levels: list[str] = []
+    # 最低活跃档位；空表示不限
+    min_level: str = ""
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> ActivityFilter:
-        """从求职配置取选中的档位。"""
-        return cls(levels=list(config.get("activity") or []))
+        """从求职配置取阈值。
+
+        老版本把活跃度存成多选列表，这里只认字符串，列表一律当「不限」，
+        正好是升级策略：旧的多选配置清空回「不限」，由用户重设。
+        """
+        raw = config.get("activity")
+        return cls(min_level=raw if isinstance(raw, str) else "")
 
     @property
     def active(self) -> bool:
         """是否真的按活跃度过滤。"""
-        return bool(self._wanted())
-
-    def _wanted(self) -> list[str]:
-        known = set(Activity.labels())
-        return [level for level in self.levels if level in known]
+        return self.min_level in set(Activity.labels())
 
     def reject_reason(self, active_time: str, *, online: bool = False) -> str:
         """不符合返回原因，符合返回空串。
@@ -331,13 +377,12 @@ class ActivityFilter(BaseModel):
         读不到活跃度（接口没给、或详情响应超时）时返回空串，即**放行**：
         宁可投一个活跃度未知的岗位，也不因为读不到就把合适的岗位丢掉。
         """
-        wanted = self._wanted()
-        if not wanted:
+        if not self.active:
             return ""
         level = Activity.of(active_time, online=online)
         if level == Activity.UNKNOWN:
             return ""
-        if level in wanted or (Activity.ONLINE in wanted and online):
+        if Activity.rank(level) <= Activity.rank(self.min_level):
             return ""
         return f"活跃度不符（{level}）"
 

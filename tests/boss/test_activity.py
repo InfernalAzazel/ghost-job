@@ -1,4 +1,4 @@
-"""Boss 活跃度：措辞归一成档位，以及多选过滤的判定。
+"""Boss 活跃度：措辞归一成档位，以及阈值过滤的判定。
 
 文案取值来自真实接口（``job/detail.json`` 的 ``zpData.bossInfo.activeTimeDesc``）：
 同一批岗位里实测出现过下面 ``REAL_TEXTS`` 里的十几种写法，所以这里按档位比对，
@@ -86,38 +86,84 @@ def test_empty_selection_does_not_filter():
     assert activity.reject_reason("半年前活跃") == ""
 
 
-def test_selected_levels_are_matched():
-    activity = ActivityFilter(levels=["刚刚活跃", "今日活跃"])
+def test_threshold_rejects_less_active_levels():
+    """只投活跃度不低于阈值的岗位：等于阈值通过，更旧被拒。"""
+    activity = ActivityFilter(min_level="本周活跃")
     assert activity.active
+    assert activity.reject_reason("在线") == ""
     assert activity.reject_reason("刚刚活跃") == ""
-    assert activity.reject_reason("今日活跃") == ""
+    assert activity.reject_reason("本周活跃") == ""
+    assert activity.reject_reason("2周内活跃") == "活跃度不符（2周内活跃）"
     assert activity.reject_reason("半年前活跃") == "活跃度不符（半年前活跃）"
 
 
-def test_online_option_matches_online_flag_only():
-    """只勾「在线」时，只有在线命中；没在线但文案是别的档位不算。"""
-    activity = ActivityFilter(levels=["在线"])
+def test_threshold_at_online_only_accepts_online():
+    """阈值取「在线」时只投在线岗位：别的档位再新也过不了。"""
+    activity = ActivityFilter(min_level="在线")
     assert activity.reject_reason("", online=True) == ""
-    assert activity.reject_reason("刚刚活跃", online=True) == ""
     assert activity.reject_reason("今日活跃") == "活跃度不符（今日活跃）"
+
+
+def test_least_active_threshold_accepts_every_known_level():
+    """阈值取最旧一档时，除读不到的之外全部通过。"""
+    activity = ActivityFilter(min_level="半年前活跃")
+    assert activity.reject_reason("半年前活跃") == ""
+    assert activity.reject_reason("刚刚活跃") == ""
+    assert activity.reject_reason("") == ""
 
 
 def test_unknown_activity_is_allowed_through():
     """读不到活跃度就放行，不因为读不到而丢掉岗位。"""
-    activity = ActivityFilter(levels=["今日活跃"])
+    activity = ActivityFilter(min_level="今日活跃")
     assert activity.reject_reason("") == ""
-    assert activity.reject_reason("未知") == ""
+    assert activity.reject_reason("最近很忙") == ""
     assert activity.reject_reason("", online=False) == ""
 
 
-def test_unknown_levels_in_config_are_ignored():
-    """配置里混进无效档位时按「没有有效档位」处理，即不过滤。"""
-    activity = ActivityFilter(levels=["昨天下午"])
+def test_unknown_threshold_is_ignored():
+    """配置里的档位认不出来时按「不限」处理，即不过滤。"""
+    activity = ActivityFilter(min_level="昨天下午")
     assert not activity.active
     assert activity.reject_reason("半年前活跃") == ""
 
 
-def test_from_config_reads_activity_list():
-    assert ActivityFilter.from_config({"activity": ["本周活跃"]}).levels == ["本周活跃"]
-    assert ActivityFilter.from_config({}).levels == []
-    assert ActivityFilter.from_config({"activity": None}).levels == []
+def test_from_config_reads_threshold_string():
+    assert ActivityFilter.from_config({"activity": "本周活跃"}).min_level == "本周活跃"
+    assert ActivityFilter.from_config({}).min_level == ""
+    assert ActivityFilter.from_config({"activity": None}).min_level == ""
+
+
+def test_from_config_ignores_legacy_multi_select_list():
+    """老版本存的是多选列表，升级后一律按「不限」处理。"""
+    activity = ActivityFilter.from_config({"activity": ["刚刚活跃", "本月活跃"]})
+    assert not activity.active
+    assert activity.reject_reason("半年前活跃") == ""
+
+
+def test_rank_orders_levels_from_online_to_stalest():
+    """排名越活跃越小，「在线」为 0；未知档排在最后。"""
+    labels = Activity.labels()
+    assert Activity.rank("在线") == 0
+    assert Activity.rank("刚刚活跃") == 1
+    assert Activity.rank("半年前活跃") == len(labels) - 1
+    assert Activity.rank("没这个档") == len(labels)
+
+
+def test_wordings_at_least_unions_that_level_and_newer():
+    """阈值筛历史岗位时，要把阈值及其更活跃档位的措辞全算上（「在线」不入库）。"""
+    wordings = Activity.wordings_at_least("3日内活跃")
+    assert "今日活跃" in wordings
+    assert "昨天活跃" in wordings
+    assert "本周活跃" not in wordings
+    assert "在线" not in wordings
+    assert Activity.wordings_at_least("没这个档") == ()
+
+
+def test_index_and_level_at_round_trip():
+    """界面索引与档位互转；未知档和越界索引都落到有效档位。"""
+    assert Activity.level_at(0) == "在线"
+    assert Activity.index("在线") == 0
+    assert Activity.level_at(Activity.index("本周活跃")) == "本周活跃"
+    assert Activity.level_at(-5) == Activity.labels()[0]
+    assert Activity.level_at(99) == Activity.labels()[-1]
+    assert Activity.index("没这个档") == Activity.index(Activity.DEFAULT_LEVEL)

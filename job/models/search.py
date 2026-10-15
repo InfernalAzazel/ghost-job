@@ -47,6 +47,23 @@ def _dumps_list(values: Sequence[str] | None) -> str:
     return json.dumps(list(values or []), ensure_ascii=False)
 
 
+def _loads_text(raw: str) -> str:
+    """把库里存的 JSON 字符串解析出来。
+
+    不是字符串时返回空串：老版本把活跃度存成多选数组，升级后一律按「不限」处理。
+    """
+    try:
+        data = json.loads(raw or '""')
+    except json.JSONDecodeError:
+        return ""
+    return data if isinstance(data, str) else ""
+
+
+def _dumps_text(value: str | None) -> str:
+    """把单个字符串序列化进库。"""
+    return json.dumps(value or "", ensure_ascii=False)
+
+
 # 多选字段名；库里各存为 ``<字段>_json``（JSON 标签列表）
 LIST_FIELDS = (
     "cities",
@@ -59,7 +76,6 @@ LIST_FIELDS = (
     "exclude_keywords",
     "include_companies",
     "exclude_companies",
-    "activity",
 )
 
 
@@ -83,7 +99,10 @@ class SearchConfigRow(SQLModel, table=True):
     funding_json: str = _list_field("融资阶段")
     scale_json: str = _list_field("企业规模")
     industry_json: str = _list_field("行业")
-    activity_json: str = _list_field("Boss 活跃度（选中的档位）")
+    activity_json: str = Field(
+        default=_dumps_text(""),
+        description="Boss 活跃度最低档位（JSON 字符串；空表示不限）",
+    )
     include_keywords_json: str = _list_field("职位名包含关键词")
     exclude_keywords_json: str = _list_field("职位名排除关键词")
     include_companies_json: str = _list_field("公司名包含关键词")
@@ -113,12 +132,13 @@ class SearchConfigRow(SQLModel, table=True):
     )
 
     def to_dict(self) -> dict[str, Any]:
-        """转为配置页 / URL 拼装用的字典（多选已展开为 list）。"""
+        """转为配置页 / URL 拼装用的字典（多选展开为 list，活跃度是单个档位字符串）。"""
         return {
             "query": self.query,
             "job_type": self.job_type,
             "salary": self.salary,
             **{f: _loads_list(getattr(self, f"{f}_json")) for f in LIST_FIELDS},
+            "activity": _loads_text(self.activity_json),
             "pace": self.pace,
             "pace_params": _loads_dict(self.pace_json),
             "ai_review": self.ai_review,
@@ -168,11 +188,14 @@ class SearchConfigRow(SQLModel, table=True):
         min_score: int | None = None,
         resume_path: str | None = None,
         resume_text: str | None = None,
+        activity_min: str | None = None,
         **lists: list[str] | None,
     ) -> dict[str, Any]:
         """更新求职配置；未传的参数保持原值。
 
-        ``lists`` 为多选字段（见 ``LIST_FIELDS``），如 ``cities=["广州", "深圳"]``。
+        ``lists`` 为多选字段（见 ``LIST_FIELDS``），如 ``cities=["广州", "深圳"]``；
+        ``activity_min`` 是活跃度的最低档位（空串表示不限），它不是多选字段，
+        所以单独传参、单独入库。
         """
         unknown = set(lists) - set(LIST_FIELDS)
         if unknown:
@@ -199,6 +222,8 @@ class SearchConfigRow(SQLModel, table=True):
             for field, values in lists.items():
                 if values is not None:
                     setattr(row, f"{field}_json", _dumps_list(values))
+            if activity_min is not None:
+                row.activity_json = _dumps_text(activity_min)
             if pace_params is not None:
                 row.pace_json = json.dumps(pace_params)
             if min_score is not None:

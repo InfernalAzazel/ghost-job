@@ -94,8 +94,8 @@ def test_count_today_only_counts_applied(tmp_db):
     assert JobRow.count_today() == 1
 
 
-def test_filter_by_activity(tmp_db):
-    """按活跃度档位筛选：不同措辞归到同一档，没存的（空）不落进任何档。"""
+def test_filter_by_activity_threshold(tmp_db):
+    """按活跃度阈值筛选：阈值及其更活跃的档位都算命中，没存的（空）不落进任何档。"""
     JobRow.record(_job("fresh", active_time="今日活跃"))
     JobRow.record(_job("today_alt", active_time="今天活跃"))
     JobRow.record(_job("yesterday", active_time="昨日活跃"))
@@ -103,18 +103,38 @@ def test_filter_by_activity(tmp_db):
     JobRow.record(_job("unknown", active_time=""))
 
     everything, *levels = JobRow.ACTIVITY_FILTERS
-    assert everything == "全部活跃度"
+    assert everything == "不限"
     assert levels[0] == "刚刚活跃" and levels[-1] == "半年前活跃"
     assert "在线" not in levels  # 在线是实时状态，不入库
 
     assert JobRow.count(activity=everything) == 5
     assert JobRow.count(activity="") == 5  # 默认不筛
+    # 今日活跃及更活跃：今日活跃 + 今天活跃
     assert JobRow.count(activity="今日活跃") == 2
+    # 3日内活跃及更活跃：再加上昨日活跃
     assert sorted(r["uid"] for r in JobRow.list_dicts(activity="3日内活跃")) == [
-        "yesterday"
+        "fresh",
+        "today_alt",
+        "yesterday",
     ]
-    assert [r["uid"] for r in JobRow.list_dicts(activity="半年前活跃")] == ["stale"]
-    assert JobRow.count(activity="本周活跃") == 0
+    # 最旧一档：除读不到的之外全中
+    assert JobRow.count(activity="半年前活跃") == 4
+    assert JobRow.count(activity="刚刚活跃") == 0
+
+
+def test_filter_by_activity_ignores_unregistered_wordings(tmp_db):
+    """库里存的是接口原文，筛选只按登记过的措辞匹配。
+
+    没登记过的写法（在线类文案、推算出来的近似档位）不参与筛选，这是已知取舍：
+    投递时走 Activity.of 归一化照常判断，只是岗位管理里查不到。用测试把这个边界钉住。
+    """
+    JobRow.record(_job("known", active_time="半年前活跃"))
+    JobRow.record(_job("online_text", active_time="3分钟前在线"))
+    JobRow.record(_job("approximate", active_time="1年内活跃"))
+
+    # 最宽松的档位也只命中登记过的措辞
+    assert [r["uid"] for r in JobRow.list_dicts(activity="半年前活跃")] == ["known"]
+    assert JobRow.count(activity="半年前活跃") == 1
 
 
 def test_find_duplicate_by_id_or_title_company_hr(tmp_db):

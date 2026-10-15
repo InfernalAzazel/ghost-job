@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 import reflex as rx
 
 from job import __version__
+from job.boss.filters import Activity
 from job.models.setting import LlmSettings
 from job.ui.components.form import field_label, form_title, switch_card
 from job.ui.components.header import site_header
@@ -247,11 +248,7 @@ class ConfigPage:
                 cls._multi_fields(),
                 hint="可多选，不选即不限",
             ),
-            cls._section(
-                "Boss 活跃度",
-                cls._activity_field(),
-                hint="选中的活跃状态才投递，可多选；不选即不限",
-            ),
+            cls._activity_card(),
             cls._section(
                 "行业与关键词",
                 cls._keyword_section(),
@@ -561,9 +558,106 @@ class ConfigPage:
         )
 
     @classmethod
-    def _activity_field(cls) -> rx.Component:
-        """Boss 活跃度多选：BOSS 的搜索 URL 不支持，按岗位详情里的活跃度判断。"""
-        return cls._combo_field("只看这些活跃状态（多选）", "activity", "选择活跃状态")
+    def _activity_card(cls) -> rx.Component:
+        """Boss 活跃度：开关 + 最低活跃档位滑条。"""
+        return switch_card(
+            "Boss 活跃度",
+            "跳过长时间不活跃的招聘者，优先处理更可能回复的岗位",
+            ConfigState.activity_on,
+            ConfigState.set_activity_on,
+            rx.cond(ConfigState.activity_on, cls._activity_slider()),
+        )
+
+    # 滑条滑块宽度：滑块的圆心只能在「轨道两端各让出半个滑块宽度」之间移动
+    THUMB = 12
+    # 「最低活跃要求」两端的档位名要跨出圆点中心，给它留半个最宽档位名的宽度
+    TICK_ROOM = "28px"
+    # 档位名之间不重叠所需的最小宽度（13 档 × 每档 56px 左右）
+    TICK_MIN_WIDTH = "680px"
+    # 刻度行高度：圆点 + 档位名（刻度是绝对定位，不撑高父元素，得留出高度）
+    TICK_ROW_HEIGHT = "28px"
+
+    @classmethod
+    def _activity_slider(cls) -> rx.Component:
+        """最低活跃要求：滑条 + 13 档刻度（点刻度也能选）。"""
+        labels = Activity.labels()
+        return rx.vstack(
+            cls._field_label("最低活跃要求"),
+            rx.hstack(
+                rx.text("更活跃", font_size="0.8em", color=MUTED),
+                rx.spacer(),
+                rx.text("更不活跃", font_size="0.8em", color=MUTED),
+                width="100%",
+                align="center",
+            ),
+            rx.box(
+                rx.box(
+                    rx.slider(
+                        value=[ConfigState.activity_index],
+                        min=0,
+                        max=len(labels) - 1,
+                        step=1,
+                        color_scheme="blue",
+                        on_change=ConfigState.preview_activity_index,
+                        on_value_commit=ConfigState.commit_activity_index,
+                        width="100%",
+                    ),
+                    rx.box(
+                        *[
+                            cls._activity_tick(label, index)
+                            for index, label in enumerate(labels)
+                        ],
+                        position="relative",
+                        width="100%",
+                        height=cls.TICK_ROW_HEIGHT,
+                    ),
+                    padding=f"0 {cls.TICK_ROOM}",
+                    width="100%",
+                    min_width=cls.TICK_MIN_WIDTH,
+                ),
+                # 卡片窄到放不下 13 档时横向滚动，而不是让档位名叠在一起
+                overflow_x="auto",
+                width="100%",
+            ),
+            rx.text(ConfigState.activity_hint, font_size="0.8em", color=MUTED),
+            spacing="1",
+            width="100%",
+        )
+
+    @classmethod
+    def _activity_tick(cls, label: str, index: int) -> rx.Component:
+        """单个刻度：圆点 + 档位名；点一下即选中该档。
+
+        按档位在总档数里的百分比定位，圆点中心与滑条滑块在同一 x 上；
+        用 ``justify="between"`` 排版会因为各档位名宽度不同而逐档偏移。
+        """
+        total = len(Activity.labels()) - 1
+        active = ConfigState.activity_index == index
+        # 圆点中心与滑块圆心对齐：滑块圆心只能在轨道两端各让出半个滑块宽度之间移动
+        offset = f"(100% - {cls.THUMB}px) * {index / total:.6f}"
+        return rx.vstack(
+            rx.box(
+                width="7px",
+                height="7px",
+                border_radius="50%",
+                bg=rx.cond(ConfigState.activity_index >= index, ACCENT, BORDER),
+            ),
+            rx.text(
+                label,
+                font_size="11px",
+                white_space="nowrap",
+                color=rx.cond(active, ACCENT, MUTED),
+                font_weight=rx.cond(active, "600", "400"),
+            ),
+            align="center",
+            spacing="1",
+            cursor="pointer",
+            position="absolute",
+            top="0",
+            left=f"calc({cls.THUMB // 2}px + {offset})",
+            transform="translateX(-50%)",
+            on_click=ConfigState.set_activity_index(index),
+        )
 
     @classmethod
     def _combo_field(

@@ -44,9 +44,9 @@ class JobRow(SQLModel, table=True):
     )
     # 是否合适筛选项（第一项为不筛选）
     SUITABLE_FILTERS: ClassVar[tuple[str, ...]] = ("全部", "合适", "不合适")
-    # 活跃度筛选项（第一项为不筛选；「在线」是实时状态、不入库，所以不在这里）
+    # 活跃度阈值筛选项：「不限」+ 各档；不含「在线」，它不入库
     ACTIVITY_FILTERS: ClassVar[tuple[str, ...]] = (
-        "全部活跃度",
+        "不限",
         *(name for name, _ in Activity.GROUPS),
     )
 
@@ -196,9 +196,12 @@ class JobRow(SQLModel, table=True):
         _, yes, no = cls.SUITABLE_FILTERS
         if suitable in (yes, no):
             stmt = stmt.where(col(cls.suitable).is_(suitable == yes))
-        if activity and activity != cls.ACTIVITY_FILTERS[0]:
-            # 库里存的是接口原文，所以按该档位对应的全部措辞匹配
-            stmt = stmt.where(col(cls.active_time).in_(Activity.wordings(activity)))
+        # 阈值语义：该档及其更活跃的档位都算命中。库里存的是接口原文，所以按这些档位的
+        # 全部措辞并集匹配；认不出的档位（并集为空）不做过滤，与 ActivityFilter 认不出阈值
+        # 就按「不限」处理保持一致，也避免 IN () 静默返回空表。
+        wordings = Activity.wordings_at_least(activity) if activity else ()
+        if activity and activity != cls.ACTIVITY_FILTERS[0] and wordings:
+            stmt = stmt.where(col(cls.active_time).in_(wordings))
         return stmt
 
     @classmethod

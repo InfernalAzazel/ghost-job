@@ -67,12 +67,19 @@ class JobsPage:
                 size="2",
                 width="136px",
             ),
-            rx.select(
-                JobsState.activity_options,
-                value=JobsState.activity,
-                on_change=JobsState.set_activity,
-                size="2",
-                width="118px",
+            rx.hstack(
+                rx.text(
+                    "活跃度不低于", font_size="0.8em", color=MUTED, white_space="nowrap"
+                ),
+                rx.select(
+                    JobsState.activity_options,
+                    value=JobsState.activity,
+                    on_change=JobsState.set_activity,
+                    size="2",
+                    width="112px",
+                ),
+                spacing="2",
+                align="center",
             ),
             rx.box(
                 rx.hstack(

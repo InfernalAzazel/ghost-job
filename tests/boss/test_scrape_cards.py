@@ -159,7 +159,7 @@ def test_scrape_cards_skips_jobs_whose_boss_is_not_active(tmp_db):
         Job(job_id="fresh", title="AI 平台工程师", company="某公司"),
     ]
     scraper = JobScraper(session=_as_boss(None))
-    scraper._activity = ActivityFilter(levels=["今日活跃", "刚刚活跃"])
+    scraper._activity = ActivityFilter(min_level="今日活跃")
     reviewer = RecordingReviewer()
     scraper._reviewer = _as_reviewer(reviewer)
     applied: list[str] = []
@@ -210,7 +210,7 @@ def test_activity_unknown_still_applies(tmp_db):
     """读不到活跃度（详情没给）时照常投递。"""
     job = Job(job_id="unknown", title="AI 工程师", company="某公司")
     scraper = JobScraper(session=_as_boss(None))
-    scraper._activity = ActivityFilter(levels=["今日活跃"])
+    scraper._activity = ActivityFilter(min_level="今日活跃")
     applied: list[str] = []
 
     async def listed(card: Locator, index: int) -> Job | None:
