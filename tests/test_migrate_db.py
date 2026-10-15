@@ -2,6 +2,9 @@
 
 ``create_all`` 只建缺失的表，不会给已有的表加列；正式版用户手里的库是旧结构，
 必须靠 ``models._add_missing_columns`` 幂等补齐，否则一启动就 ``no such column``。
+
+TODO(v0.7.0): 过渡迁移，v0.7.0 删除本文件，随 ``models._add_missing_columns``
+一起删除。
 """
 
 from __future__ import annotations
