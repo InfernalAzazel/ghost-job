@@ -36,8 +36,9 @@ class ConfigState(rx.State):
     funding: list[str] = rx.field(default_factory=list)
     scale: list[str] = rx.field(default_factory=list)
     industry: list[str] = rx.field(default_factory=list)
-    # 只看这些活跃档位的 Boss；空表示不限
-    activity: list[str] = rx.field(default_factory=list)
+    # Boss 活跃度：是否按阈值过滤 + 最低档位的索引（0–12）
+    activity_on: bool = False
+    activity_index: int = Activity.index(Activity.DEFAULT_LEVEL)
     include_keywords: list[str] = rx.field(default_factory=list)
     exclude_keywords: list[str] = rx.field(default_factory=list)
     include_companies: list[str] = rx.field(default_factory=list)
@@ -78,7 +79,6 @@ class ConfigState(rx.State):
     education_options: list[str] = Education.labels(skip_unlimited=True)
     funding_options: list[str] = Funding.labels(skip_unlimited=True)
     scale_options: list[str] = Scale.labels(skip_unlimited=True)
-    activity_options: list[str] = Activity.labels()
     pace_options: list[str] = Pace.labels()
     industry_groups: list[str] = rx.field(default_factory=lambda: list(Industry.groups))
 
@@ -104,6 +104,19 @@ class ConfigState(rx.State):
         if not query:
             return []
         return [name for name in Industry.options if query in name.lower()]
+
+    @rx.var
+    def activity_level(self) -> str:
+        """当前阈值档位；开关关闭时也照常给出，用于文案与保存。"""
+        return Activity.level_at(self.activity_index)
+
+    @rx.var
+    def activity_hint(self) -> str:
+        """滑条下方的一句说明。"""
+        return (
+            f"当前阈值：只处理活跃度不低于 {self.activity_level} 的岗位，"
+            "右侧更不活跃的岗位会跳过"
+        )
 
     @rx.var
     def pace_custom(self) -> bool:
@@ -133,6 +146,9 @@ class ConfigState(rx.State):
         self.salary_label = Salary.label(str(config.get("salary") or ""))
         for field in LIST_FIELDS:
             setattr(self, field, list(config.get(field) or []))
+        level = str(config.get("activity") or "")
+        self.activity_on = level in set(Activity.labels())
+        self.activity_index = Activity.index(level)
         self.pace_label = Pace.label(str(config.get("pace") or ""))
         self.pace_params = PaceProfile.from_config(config).model_dump()
         self.ai_review = bool(config.get("ai_review"))
@@ -158,6 +174,7 @@ class ConfigState(rx.State):
             min_score=self.min_score,
             resume_path=self.resume_path,
             resume_text=self.resume_text,
+            activity_min=self.activity_level if self.activity_on else "",
             **{field: getattr(self, field) for field in LIST_FIELDS},
         )
         self.save_hint = "配置已自动保存"
@@ -217,6 +234,30 @@ class ConfigState(rx.State):
     @rx.event
     def set_search_tab(self, value: str):
         self.search_tab = value
+
+    @rx.event
+    def set_activity_on(self, value: bool):
+        self.activity_on = value
+        self._save()
+
+    @rx.event
+    def preview_activity_index(self, value: list[int]):
+        """拖动中：只改预览，松手才落库。"""
+        if value:
+            self.activity_index = int(value[0])
+
+    @rx.event
+    def commit_activity_index(self, value: list[int]):
+        """松手：落库。"""
+        if value:
+            self.activity_index = int(value[0])
+        self._save()
+
+    @rx.event
+    def set_activity_index(self, index: int):
+        """点刻度：直接选中并落库。"""
+        self.activity_index = int(index)
+        self._save()
 
     @rx.event
     def set_resume_match(self, value: bool):

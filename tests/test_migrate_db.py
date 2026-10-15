@@ -45,7 +45,7 @@ def _drop_new_columns(db_path: Path) -> None:
 
 def test_old_database_gets_activity_columns(tmp_db: Path):
     init_db()
-    SearchConfigRow.save(query="Agent", activity=["今日活跃"])
+    SearchConfigRow.save(query="Agent", activity_min="今日活跃")
     JobRow.record(Job(job_id="j1", title="AI 工程师", company="某公司"), applied=True)
     _drop_new_columns(tmp_db)
     assert "activity_json" not in _columns(tmp_db, "search_config")
@@ -68,7 +68,7 @@ def test_migration_keeps_existing_rows_and_defaults(tmp_db: Path):
 
     config = SearchConfigRow.load()
     assert config["query"] == "Agent" and config["cities"] == ["深圳"]
-    assert config["activity"] == []
+    assert config["activity"] == ""
     row = JobRow.get_dict("j1")
     assert row is not None
     assert (row["result"], row["activeTime"]) == ("已投递", "")
@@ -84,10 +84,7 @@ def test_migration_is_idempotent_and_column_is_writable(tmp_db: Path):
     reset_engine()
     init_db()
 
-    assert SearchConfigRow.save(activity=["本周活跃", "今日活跃"])["activity"] == [
-        "本周活跃",
-        "今日活跃",
-    ]
+    assert SearchConfigRow.save(activity_min="本周活跃")["activity"] == "本周活跃"
     JobRow.record(
         Job(
             job_id="j2",

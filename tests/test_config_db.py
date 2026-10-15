@@ -28,6 +28,7 @@ def test_seed_default_config(tmp_db: Path):
     config = SearchConfigRow.load()
     assert config["query"]
     assert config["cities"] == ["广州"]
+    assert config["activity"] == ""
     assert config["pace"] == "normal" and config["pace_params"] == {}
 
 
@@ -120,3 +121,30 @@ def test_auto_reply_settings_default_and_roundtrip(tmp_db: Path):
     assert loaded == saved and loaded.prompt == "语气轻松一点"
     assert (loaded.pace_profile.start_hour, loaded.pace_profile.end_hour) == (10, 18)
     assert LlmSettings.load() == LlmSettings()
+
+
+def test_activity_threshold_roundtrip(tmp_db: Path):
+    """活跃度阈值存单值：读回来是字符串，不是列表。"""
+    assert SearchConfigRow.load()["activity"] == ""
+
+    SearchConfigRow.save(activity_min="本周活跃")
+    assert SearchConfigRow.load()["activity"] == "本周活跃"
+
+    SearchConfigRow.save(activity_min="")
+    assert SearchConfigRow.load()["activity"] == ""
+
+
+def test_legacy_activity_list_reads_as_unlimited(tmp_db: Path):
+    """老库里 activity_json 是多选数组，升级后不能报错，按「不限」处理。"""
+    SearchConfigRow.ensure()
+    with sqlite3.connect(tmp_db) as conn:
+        conn.execute(
+            "UPDATE search_config SET activity_json = ?",
+            ('["刚刚活跃", "本月活跃"]',),
+        )
+        conn.commit()
+
+    assert SearchConfigRow.load()["activity"] == ""
+
+    SearchConfigRow.save(activity_min="3日内活跃")
+    assert SearchConfigRow.load()["activity"] == "3日内活跃"
