@@ -39,6 +39,10 @@ class JobsState(rx.State):
     suitable_options: rx.Field[list[str]] = rx.field(
         default_factory=lambda: list(JobRow.SUITABLE_FILTERS)
     )
+    activity: str = JobRow.ACTIVITY_FILTERS[0]
+    activity_options: rx.Field[list[str]] = rx.field(
+        default_factory=lambda: list(JobRow.ACTIVITY_FILTERS)
+    )
     # 从消息页「查看岗位」跳转过来时只看这个岗位（搜索框填岗位名，同名岗位也不混进来）；改搜索后失效
     focus_uid: str = ""
     page: int = 1
@@ -87,6 +91,7 @@ class JobsState(rx.State):
             "search": self.search,
             "analysis": self.analysis,
             "suitable": self.suitable,
+            "activity": self.activity,
             "uid": self.focus_uid,
         }
         self.total = JobRow.count(**filters)
@@ -115,6 +120,7 @@ class JobsState(rx.State):
             self.search = row["title"]
             self.analysis = JobRow.ANALYSIS_FILTERS[0]
             self.suitable = JobRow.SUITABLE_FILTERS[0]
+            self.activity = JobRow.ACTIVITY_FILTERS[0]
         self._reload()
 
     @rx.event
@@ -140,6 +146,13 @@ class JobsState(rx.State):
     def set_suitable(self, value: str):
         """切换是否合适筛选，回到第一页。"""
         self.suitable = value
+        self.page = 1
+        self._reload()
+
+    @rx.event
+    def set_activity(self, value: str):
+        """切换活跃度筛选，回到第一页。"""
+        self.activity = value
         self.page = 1
         self._reload()
 

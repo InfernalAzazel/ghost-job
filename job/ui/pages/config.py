@@ -235,7 +235,7 @@ class ConfigPage:
 
     @classmethod
     def _filters_form(cls) -> rx.Component:
-        """四张卡片：基础条件、多选条件、行业与关键词、拟人化。"""
+        """五张卡片：基础条件、多选条件、Boss 活跃度、行业与关键词、拟人化。"""
         return rx.vstack(
             cls._section(
                 "基础条件",
@@ -246,6 +246,11 @@ class ConfigPage:
                 "经验 / 学历 / 公司",
                 cls._multi_fields(),
                 hint="可多选，不选即不限",
+            ),
+            cls._section(
+                "Boss 活跃度",
+                cls._activity_field(),
+                hint="选中的活跃状态才投递，可多选；不选即不限",
             ),
             cls._section(
                 "行业与关键词",
@@ -554,6 +559,11 @@ class ConfigPage:
             spacing="4",
             width="100%",
         )
+
+    @classmethod
+    def _activity_field(cls) -> rx.Component:
+        """Boss 活跃度多选：BOSS 的搜索 URL 不支持，按岗位详情里的活跃度判断。"""
+        return cls._combo_field("只看这些活跃状态（多选）", "activity", "选择活跃状态")
 
     @classmethod
     def _combo_field(

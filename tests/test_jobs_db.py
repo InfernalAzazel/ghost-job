@@ -94,6 +94,29 @@ def test_count_today_only_counts_applied(tmp_db):
     assert JobRow.count_today() == 1
 
 
+def test_filter_by_activity(tmp_db):
+    """按活跃度档位筛选：不同措辞归到同一档，没存的（空）不落进任何档。"""
+    JobRow.record(_job("fresh", active_time="今日活跃"))
+    JobRow.record(_job("today_alt", active_time="今天活跃"))
+    JobRow.record(_job("yesterday", active_time="昨日活跃"))
+    JobRow.record(_job("stale", active_time="半年前活跃"))
+    JobRow.record(_job("unknown", active_time=""))
+
+    everything, *levels = JobRow.ACTIVITY_FILTERS
+    assert everything == "全部活跃度"
+    assert levels[0] == "刚刚活跃" and levels[-1] == "半年前活跃"
+    assert "在线" not in levels  # 在线是实时状态，不入库
+
+    assert JobRow.count(activity=everything) == 5
+    assert JobRow.count(activity="") == 5  # 默认不筛
+    assert JobRow.count(activity="今日活跃") == 2
+    assert sorted(r["uid"] for r in JobRow.list_dicts(activity="3日内活跃")) == [
+        "yesterday"
+    ]
+    assert [r["uid"] for r in JobRow.list_dicts(activity="半年前活跃")] == ["stale"]
+    assert JobRow.count(activity="本周活跃") == 0
+
+
 def test_find_duplicate_by_id_or_title_company_hr(tmp_db):
     JobRow.record(_job("a", title="AI 工程师", hr_name="张女士"), suitable=False)
 

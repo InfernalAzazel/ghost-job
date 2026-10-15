@@ -6,6 +6,7 @@ import reflex as rx
 from pydantic import ValidationError
 
 from job.boss.filters import (
+    Activity,
     City,
     Education,
     Experience,
@@ -35,6 +36,8 @@ class ConfigState(rx.State):
     funding: list[str] = rx.field(default_factory=list)
     scale: list[str] = rx.field(default_factory=list)
     industry: list[str] = rx.field(default_factory=list)
+    # 只看这些活跃档位的 Boss；空表示不限
+    activity: list[str] = rx.field(default_factory=list)
     include_keywords: list[str] = rx.field(default_factory=list)
     exclude_keywords: list[str] = rx.field(default_factory=list)
     include_companies: list[str] = rx.field(default_factory=list)
@@ -75,6 +78,7 @@ class ConfigState(rx.State):
     education_options: list[str] = Education.labels(skip_unlimited=True)
     funding_options: list[str] = Funding.labels(skip_unlimited=True)
     scale_options: list[str] = Scale.labels(skip_unlimited=True)
+    activity_options: list[str] = Activity.labels()
     pace_options: list[str] = Pace.labels()
     industry_groups: list[str] = rx.field(default_factory=lambda: list(Industry.groups))
 

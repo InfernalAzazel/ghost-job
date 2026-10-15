@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from job.boss.chat import ChatReplier, ChatResponder
 from job.boss.chat_sync import ChatSyncer
-from job.boss.filters import KeywordFilter, PaceProfile, SearchUrl
+from job.boss.filters import ActivityFilter, KeywordFilter, PaceProfile, SearchUrl
 from job.boss.jobs import JobScraper
 from job.boss.review import JobReviewer
 from job.boss.session import BossSession
@@ -211,6 +211,7 @@ class BossState(rx.State):
             targets = SearchUrl.by_city(config)
             pace = PaceProfile.from_config(config)
             keywords = KeywordFilter.from_config(config)
+            activity = ActivityFilter.from_config(config)
             reviewer = JobReviewer.from_config(config, LlmSettings.load())
             resume = str(config.get("resume_text") or "").strip()
             if config.get("resume_match") and not resume:
@@ -259,6 +260,7 @@ class BossState(rx.State):
                 targets,
                 pace=pace,
                 keywords=keywords,
+                activity=activity,
                 reviewer=reviewer,
                 on_job=on_job,
                 on_log=on_log,
@@ -270,7 +272,9 @@ class BossState(rx.State):
                     f"{_FINISHED.get(state, state)}：本次投递 {self.session_count} 条，"
                     f"重复 {self.dup_count} 条，跳过 {self.skip_count} 条，"
                     f"累计投递 {self.stored_count} 条",
-                    "warn" if state in ("need_login", "load_failed", "limit") else "info",
+                    "warn"
+                    if state in ("need_login", "load_failed", "limit")
+                    else "info",
                 )
                 self.busy = False
         except (RuntimeError, PlaywrightError, SQLAlchemyError) as exc:

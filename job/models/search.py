@@ -59,6 +59,7 @@ LIST_FIELDS = (
     "exclude_keywords",
     "include_companies",
     "exclude_companies",
+    "activity",
 )
 
 
@@ -82,6 +83,7 @@ class SearchConfigRow(SQLModel, table=True):
     funding_json: str = _list_field("融资阶段")
     scale_json: str = _list_field("企业规模")
     industry_json: str = _list_field("行业")
+    activity_json: str = _list_field("Boss 活跃度（选中的档位）")
     include_keywords_json: str = _list_field("职位名包含关键词")
     exclude_keywords_json: str = _list_field("职位名排除关键词")
     include_companies_json: str = _list_field("公司名包含关键词")

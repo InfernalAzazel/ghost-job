@@ -67,6 +67,13 @@ class JobsPage:
                 size="2",
                 width="136px",
             ),
+            rx.select(
+                JobsState.activity_options,
+                value=JobsState.activity,
+                on_change=JobsState.set_activity,
+                size="2",
+                width="118px",
+            ),
             rx.box(
                 rx.hstack(
                     rx.icon("search", size=16, color=MUTED),
@@ -225,6 +232,13 @@ class JobsPage:
                 width="72px",
             ),
             rx.text(
+                "活跃度",
+                font_size="0.8em",
+                color=MUTED,
+                font_weight="600",
+                width="86px",
+            ),
+            rx.text(
                 "判断描述",
                 font_size="0.8em",
                 color=MUTED,
@@ -308,6 +322,20 @@ class JobsPage:
                 min_width="0",
             ),
             rx.box(JobsPage._suitable_badge(job["suitable"]), width="72px"),
+            rx.box(
+                rx.cond(
+                    job["activeTime"] != "",
+                    rx.badge(
+                        job["activeTime"],
+                        variant="soft",
+                        color_scheme="gray",
+                        font_size="0.7em",
+                        white_space="nowrap",
+                    ),
+                    rx.text("—", font_size="0.8em", color=MUTED),
+                ),
+                width="86px",
+            ),
             rx.box(
                 rx.cond(
                     job["reason"] != "",
@@ -500,6 +528,14 @@ class JobsPage:
                         JobsState.detail["hrName"] != "",
                         rx.text(
                             f"HR：{JobsState.detail['hrName']} · {JobsState.detail['hrTitle']}",
+                            font_size="0.85em",
+                            color=MUTED,
+                        ),
+                    ),
+                    rx.cond(
+                        JobsState.detail["activeTime"] != "",
+                        rx.text(
+                            f"Boss 活跃度：{JobsState.detail['activeTime']}",
                             font_size="0.85em",
                             color=MUTED,
                         ),

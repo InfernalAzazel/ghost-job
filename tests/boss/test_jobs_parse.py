@@ -85,3 +85,53 @@ def test_with_detail_reads_job_card_and_keeps_existing_values():
 def test_with_detail_ignores_malformed_payload():
     job = Job.model_validate(LIST_ITEM)
     assert job.with_detail({"zpData": None}) == job
+
+
+def test_list_item_has_no_activity():
+    """列表接口不带活跃度文案，也没有在线标记。"""
+    job = Job.model_validate(LIST_ITEM)
+    assert (job.active_time, job.boss_online) == ("", False)
+
+
+def test_parse_activity_from_detail_boss_info():
+    """详情接口的活跃度在 zpData.bossInfo 里。"""
+    job = Job.model_validate(LIST_ITEM).with_detail(
+        {
+            "zpData": {
+                "bossInfo": {
+                    "name": "王五",
+                    "title": "技术负责人",
+                    "activeTimeDesc": "今日活跃",
+                    "bossOnline": False,
+                }
+            }
+        }
+    )
+    assert job.active_time == "今日活跃"
+    assert job.boss_online is False
+
+
+def test_parse_activity_from_flat_card_payload():
+    """job/card.json 是扁平结构，字段直接放在 zpData 下。"""
+    job = Job.model_validate(LIST_ITEM).with_detail(
+        {"zpData": {"activeTimeDesc": "本周活跃", "bossOnline": True}}
+    )
+    assert (job.active_time, job.boss_online) == ("本周活跃", True)
+
+
+def test_activity_is_parsed_from_list_payload_when_present():
+    """列表条目里也有 bossOnline（在线），但通常没有活跃度文案。"""
+    job = Job.model_validate({**LIST_ITEM, "bossOnline": True})
+    assert (job.active_time, job.boss_online) == ("", True)
+
+
+def test_activity_null_is_treated_as_empty():
+    job = Job.model_validate({**LIST_ITEM, "activeTimeDesc": None, "bossOnline": None})
+    assert (job.active_time, job.boss_online) == ("", False)
+
+
+def test_activity_fields_in_dump_exclude_transient_online():
+    """``active_time`` 要入库，``boss_online`` 只是当时的在线状态，不入库。"""
+    dumped = Job.model_validate(LIST_ITEM).model_dump()
+    assert "active_time" in dumped
+    assert "boss_online" not in dumped

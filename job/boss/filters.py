@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import re
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta
 from typing import Any, ClassVar
@@ -195,6 +196,150 @@ class KeywordFilter(BaseModel):
         """text 是否包含任一关键词。"""
         lowered = text.lower()
         return any(w.lower() in lowered for w in words)
+
+
+class Activity:
+    """Boss 活跃度：详情接口的 ``zpData.bossInfo.activeTimeDesc`` → 档位。
+
+    BOSS 搜索 URL 不支持活跃度筛选，只能在本地按岗位详情判断。文案由 BOSS 自己生成，
+    实测同一批岗位就有「刚刚活跃 / 今日活跃 / 3日内活跃 / 本周活跃 / 2周内活跃 /
+    本月活跃 / 2月内活跃 / 3月内活跃 / 4月内活跃 / 5月内活跃 / 近半年活跃 /
+    半年前活跃」十余种，所以这里把措辞**归一成档位**，而不是逐字枚举比对
+    （逐字比对会漏掉「近半年活跃」↔「半年前活跃」这类互不包含的写法）。
+    """
+
+    # 认不出来时的档位
+    UNKNOWN: ClassVar[str] = "未知"
+    # 在线：接口另有布尔 ``bossOnline``，文案里也可能是「3分钟前在线」这类写法
+    ONLINE: ClassVar[str] = "在线"
+    # 档位（越靠前越活跃）→ 归入该档的接口文案
+    GROUPS: ClassVar[tuple[tuple[str, tuple[str, ...]], ...]] = (
+        ("刚刚活跃", ("刚刚活跃", "刚活跃")),
+        ("今日活跃", ("今日活跃", "今天活跃")),
+        ("3日内活跃", ("3日内活跃", "三日内活跃", "日内活跃", "昨日活跃", "昨天活跃")),
+        ("本周活跃", ("本周活跃", "这周活跃")),
+        ("2周内活跃", ("2周内活跃", "两周内活跃")),
+        ("本月活跃", ("本月活跃", "这个月活跃")),
+        ("2月内活跃", ("2月内活跃", "两个月内活跃")),
+        ("3月内活跃", ("3月内活跃", "三个月内活跃")),
+        ("4月内活跃", ("4月内活跃", "四个月内活跃")),
+        ("5月内活跃", ("5月内活跃", "五个月内活跃")),
+        ("近半年活跃", ("近半年活跃", "半年内活跃")),
+        ("半年前活跃", ("半年前活跃", "数月前活跃", "很久前活跃")),
+    )
+    # BOSS 会给数字套私用区字符防抓取（与 ``jobs._ENCRYPTED`` 同一手段）
+    _PRIVATE_START: ClassVar[int] = 0xE031
+    _PRIVATE_END: ClassVar[int] = 0xE03A
+    # 兜底换算用：「3日 / 2周 / 5个月」里的数字与单位
+    _NUMBER: ClassVar[re.Pattern[str]] = re.compile(r"(\d+)\s*个?\s*(日|天|周|月)")
+    _DAYS: ClassVar[tuple[tuple[int, str], ...]] = (
+        (1, "今日活跃"),
+        (3, "3日内活跃"),
+        (7, "本周活跃"),
+    )
+    _MONTHS: ClassVar[dict[int, str]] = {
+        1: "本月活跃",
+        2: "2月内活跃",
+        3: "3月内活跃",
+        4: "4月内活跃",
+        5: "5月内活跃",
+        6: "近半年活跃",
+    }
+
+    @classmethod
+    def labels(cls) -> list[str]:
+        """界面上的全部档位（按活跃度从新到旧）。"""
+        return [cls.ONLINE, *(name for name, _ in cls.GROUPS)]
+
+    @classmethod
+    def wordings(cls, level: str) -> tuple[str, ...]:
+        """某个档位对应的全部接口措辞（入库后按档位筛选时用）。"""
+        for name, wordings in cls.GROUPS:
+            if name == level:
+                return wordings
+        return (level,)
+
+    @classmethod
+    def clean(cls, text: str) -> str:
+        """去掉空白与零宽字符，私用区数字还原成 0-9。"""
+        chars: list[str] = []
+        for char in str(text or ""):
+            code = ord(char)
+            if cls._PRIVATE_START <= code <= cls._PRIVATE_END:
+                chars.append(str(code - cls._PRIVATE_START))
+            elif char not in " \t\r\n\u200b\u200c\u200d\u200e\u200f\ufeff":
+                chars.append(char)
+        return "".join(chars)
+
+    @classmethod
+    def of(cls, active_time: str, *, online: bool = False) -> str:
+        """接口字段 → 档位；认不出来返回「未知」。文案能认时以文案为准。"""
+        text = cls.clean(active_time)
+        if "在线" in text:
+            return cls.ONLINE
+        for name, wordings in cls.GROUPS:
+            if text in wordings:
+                return name
+        return cls._by_number(text) or (cls.ONLINE if online else cls.UNKNOWN)
+
+    @classmethod
+    def _by_number(cls, text: str) -> str:
+        """没登记过的措辞，按「N 日 / N 周 / N 个月 / N 年」推一个最接近的档位。"""
+        if not text:
+            return ""
+        if "年" in text:
+            return "近半年活跃" if "近" in text else "半年前活跃"
+        match = cls._NUMBER.search(text)
+        if match is None:
+            return ""
+        count, unit = int(match.group(1)), match.group(2)
+        if unit in ("日", "天"):
+            for limit, name in cls._DAYS:
+                if count <= limit:
+                    return name
+            return "2周内活跃"
+        if unit == "周":
+            return "本周活跃" if count <= 1 else "2周内活跃"
+        if count in cls._MONTHS:
+            return cls._MONTHS[count]
+        return "近半年活跃" if count < 12 else "半年前活跃"
+
+
+class ActivityFilter(BaseModel):
+    """本地活跃度过滤（BOSS URL 不支持）：按详情接口给的活跃度判断。"""
+
+    # 只看这些活跃档位（在线的岗位也算命中）；空表示不限
+    levels: list[str] = []
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> ActivityFilter:
+        """从求职配置取选中的档位。"""
+        return cls(levels=list(config.get("activity") or []))
+
+    @property
+    def active(self) -> bool:
+        """是否真的按活跃度过滤。"""
+        return bool(self._wanted())
+
+    def _wanted(self) -> list[str]:
+        known = set(Activity.labels())
+        return [level for level in self.levels if level in known]
+
+    def reject_reason(self, active_time: str, *, online: bool = False) -> str:
+        """不符合返回原因，符合返回空串。
+
+        读不到活跃度（接口没给、或详情响应超时）时返回空串，即**放行**：
+        宁可投一个活跃度未知的岗位，也不因为读不到就把合适的岗位丢掉。
+        """
+        wanted = self._wanted()
+        if not wanted:
+            return ""
+        level = Activity.of(active_time, online=online)
+        if level == Activity.UNKNOWN:
+            return ""
+        if level in wanted or (Activity.ONLINE in wanted and online):
+            return ""
+        return f"活跃度不符（{level}）"
 
 
 class Pace(FilterField):

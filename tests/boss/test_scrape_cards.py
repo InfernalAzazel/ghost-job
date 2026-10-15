@@ -10,7 +10,7 @@ import pytest
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from job import models as models_pkg
-from job.boss.filters import KeywordFilter
+from job.boss.filters import ActivityFilter, KeywordFilter
 from job.boss.jobs import Job, JobScraper
 from job.boss.review import Verdict
 from job.models import init_db, reset_engine
@@ -139,6 +139,103 @@ def test_scrape_cards_records_every_decision(tmp_db):
     assert JobRow.get_dict("err") is None
     ok = _row("ok")
     assert (ok["result"], ok["reason"]) == ("已投递", "Agent 方向吻合")
+
+
+class RecordingReviewer:
+    """记录被复核过的职位，用来验证活跃度不符的岗位不会浪费一次 AI 复核。"""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    async def check(self, job: Job) -> Verdict:
+        self.seen.append(job.job_id)
+        return Verdict(match=True, reason="Agent 方向吻合")
+
+
+def test_scrape_cards_skips_jobs_whose_boss_is_not_active(tmp_db):
+    """活跃度不符的：入库记为不合适、不投递，也不进 AI 复核。"""
+    jobs = [
+        Job(job_id="stale", title="AI 工程师", company="某公司"),
+        Job(job_id="fresh", title="AI 平台工程师", company="某公司"),
+    ]
+    scraper = JobScraper(session=_as_boss(None))
+    scraper._activity = ActivityFilter(levels=["今日活跃", "刚刚活跃"])
+    reviewer = RecordingReviewer()
+    scraper._reviewer = _as_reviewer(reviewer)
+    applied: list[str] = []
+    logs: list[str] = []
+
+    async def listed(card: Locator, index: int) -> Job | None:
+        del card
+        return jobs[index]
+
+    async def detail(page: Page, card: Locator, job: Job) -> Job:
+        del page, card
+        activity = "半年前活跃" if job.job_id == "stale" else "刚刚活跃"
+        return job.model_copy(update={"active_time": activity})
+
+    async def apply(page: Page) -> str:
+        del page
+        applied.append("apply")
+        return ""
+
+    async def pause(span: tuple[float, float]) -> None:
+        del span
+
+    async def on_log(_level: str, text: str) -> None:
+        logs.append(text)
+
+    scraper._listed_job_for = listed
+    scraper._open_detail = detail
+    scraper._apply = apply
+    scraper._pause = pause
+    scraper._on_log = on_log
+
+    batch = asyncio.run(
+        scraper._scrape_cards(_as_page(FakePage(len(jobs))), set(), None)
+    )
+
+    assert [j.job_id for j in batch] == ["fresh"]
+    assert len(applied) == 1
+    assert reviewer.seen == ["fresh"]
+    stale = _row("stale")
+    assert (stale["suitable"], stale["result"]) == (False, "不合适")
+    assert stale["reason"] == "活跃度不符（半年前活跃）"
+    assert stale["activeTime"] == "半年前活跃"
+    assert _row("fresh")["activeTime"] == "刚刚活跃"
+    assert any("活跃度不符（半年前活跃）" in line for line in logs)
+
+
+def test_activity_unknown_still_applies(tmp_db):
+    """读不到活跃度（详情没给）时照常投递。"""
+    job = Job(job_id="unknown", title="AI 工程师", company="某公司")
+    scraper = JobScraper(session=_as_boss(None))
+    scraper._activity = ActivityFilter(levels=["今日活跃"])
+    applied: list[str] = []
+
+    async def listed(card: Locator, index: int) -> Job | None:
+        del card, index
+        return job
+
+    async def detail(page: Page, card: Locator, job: Job) -> Job:
+        del page, card
+        return job
+
+    async def apply(page: Page) -> str:
+        del page
+        applied.append("apply")
+        return ""
+
+    async def pause(span: tuple[float, float]) -> None:
+        del span
+
+    scraper._listed_job_for = listed
+    scraper._open_detail = detail
+    scraper._apply = apply
+    scraper._pause = pause
+
+    batch = asyncio.run(scraper._scrape_cards(_as_page(FakePage(1)), set(), None))
+    assert [j.job_id for j in batch] == ["unknown"] and applied == ["apply"]
 
 
 def test_stop_during_read_pause_does_not_send_application(tmp_db):

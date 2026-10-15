@@ -25,7 +25,7 @@ from pydantic import (
 )
 from pydantic_ai.exceptions import AgentRunError
 
-from job.boss.filters import BASE_URL, KeywordFilter, PaceProfile
+from job.boss.filters import BASE_URL, ActivityFilter, KeywordFilter, PaceProfile
 from job.models.job import JobRow
 from job.utils import as_dict
 
@@ -93,6 +93,23 @@ class Job(BaseModel):
     location: str = ""
     experience: str = Field(default="", validation_alias="jobExperience")
     education: str = Field(default="", validation_alias="jobDegree")
+    active_time: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            _detail_path("bossInfo", "activeTimeDesc"),
+            _detail_path("activeTimeDesc"),
+            "activeTimeDesc",
+        ),
+    )
+    boss_online: bool = Field(
+        default=False,
+        exclude=True,
+        validation_alias=AliasChoices(
+            _detail_path("bossInfo", "bossOnline"),
+            _detail_path("bossOnline"),
+            "bossOnline",
+        ),
+    )
     description: str = Field(
         default="",
         validation_alias=AliasChoices(
@@ -138,6 +155,12 @@ class Job(BaseModel):
         """接口里的 null 按空字符串处理。"""
         return "" if value is None else value
 
+    @field_validator("boss_online", mode="before")
+    @classmethod
+    def _blank_to_false(cls, value: Any) -> Any:
+        """``bossOnline`` 缺失或为 null 时按「不在线」处理。"""
+        return False if value is None or value == "" else value
+
     @field_validator("salary")
     @classmethod
     def _drop_encrypted_salary(cls, value: str) -> str:
@@ -145,9 +168,17 @@ class Job(BaseModel):
         return "" if _ENCRYPTED.search(value) else value
 
     def with_detail(self, payload: dict[str, Any]) -> Job:
-        """用详情接口的非空字段（描述、地址、HR、公司 ID）补全当前职位。"""
+        """用详情接口的非空字段（描述、地址、HR、公司 ID、Boss 活跃度）补全当前职位。"""
         detail = Job.model_validate(payload)
-        fields = ("description", "address", "hr_name", "hr_title", "brand_id")
+        fields = (
+            "description",
+            "address",
+            "hr_name",
+            "hr_title",
+            "brand_id",
+            "active_time",
+            "boss_online",
+        )
         return self.model_copy(
             update={k: v for k in fields if (v := getattr(detail, k))}
         )
@@ -185,6 +216,7 @@ class JobScraper:
         self._listed: dict[str, Job] = {}
         self._pace = PaceProfile()
         self._keywords = KeywordFilter()
+        self._activity = ActivityFilter()
         self._reviewer: JobReviewer | None = None
         self._saved = 0
         self._today = 0
@@ -202,6 +234,7 @@ class JobScraper:
         *,
         pace: PaceProfile | None = None,
         keywords: KeywordFilter | None = None,
+        activity: ActivityFilter | None = None,
         reviewer: JobReviewer | None = None,
         on_job: Callable[[Job], Awaitable[None]] | None = None,
         on_log: LogSink | None = None,
@@ -209,6 +242,7 @@ class JobScraper:
         """按城市依次自动投递：``targets`` 为 [(城市名, 搜索 URL)]，一个城市看完换下一个。
 
         按节奏 ``pace`` 投递，``keywords`` 不符合的卡片跳过不点开；
+        ``activity`` 只在点开详情后才知道（列表接口不带活跃度），不符合的不投递；
         传了 ``reviewer`` 时，点开详情后再做一次 AI 复核，不通过的不投递。
         看过的岗位连同是否合适、原因一起入库，下次直接跳过；每天最多投递 ``DAILY_LIMIT`` 次。
         过程日志交给 ``on_log``（不打印到终端）。
@@ -217,6 +251,7 @@ class JobScraper:
         self._stop.clear()
         self._pace = pace or PaceProfile()
         self._keywords = keywords or KeywordFilter()
+        self._activity = activity or ActivityFilter()
         self._reviewer = reviewer
         self._on_log = on_log
         self._saved = 0
@@ -313,7 +348,9 @@ class JobScraper:
         operation = asyncio.ensure_future(action)
         stopped = asyncio.create_task(self._stop.wait())
         try:
-            await asyncio.wait((operation, stopped), return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait(
+                (operation, stopped), return_when=asyncio.FIRST_COMPLETED
+            )
             if self._stop.is_set():
                 return False
             await operation
@@ -333,7 +370,8 @@ class JobScraper:
         """逐个处理当前可见、未看过的卡片。
 
         库里已有的（职位 ID 或标题、公司、HR 相同）直接跳过；不符合关键词的记为不合适，
-        不点开；其余点开取详情、AI 复核，合适的投递。判断结果和原因都入库。
+        不点开；其余点开取详情，活跃度不符或 AI 复核不通过的记为不合适，合适的投递。
+        判断结果和原因都入库。
         """
         cards = page.locator(self.CARD)
         batch: list[Job] = []
@@ -356,6 +394,14 @@ class JobScraper:
                 continue
 
             job = await self._open_detail(page, card, job)
+            if reason := self._activity.reject_reason(
+                job.active_time, online=job.boss_online
+            ):
+                JobRow.record(job, suitable=False, reason=reason)
+                await self._log(f"{name}（{reason}）", "skip")
+                await self._pause(self._pace.read)
+                continue
+
             reason, score = "符合筛选条件", None
             if self._reviewer:
                 try:

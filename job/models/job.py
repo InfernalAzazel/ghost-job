@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from sqlalchemy import or_
 from sqlmodel import Field, SQLModel, col, select
 
+from job.boss.filters import Activity
+
 if TYPE_CHECKING:
     from job.boss.jobs import Job
 
@@ -42,6 +44,11 @@ class JobRow(SQLModel, table=True):
     )
     # 是否合适筛选项（第一项为不筛选）
     SUITABLE_FILTERS: ClassVar[tuple[str, ...]] = ("全部", "合适", "不合适")
+    # 活跃度筛选项（第一项为不筛选；「在线」是实时状态、不入库，所以不在这里）
+    ACTIVITY_FILTERS: ClassVar[tuple[str, ...]] = (
+        "全部活跃度",
+        *(name for name, _ in Activity.GROUPS),
+    )
 
     uid: str = Field(primary_key=True, description="主键：优先 job_id，否则用 link")
     job_id: str | None = Field(default=None, index=True)
@@ -55,6 +62,7 @@ class JobRow(SQLModel, table=True):
     location: str = ""
     experience: str = ""
     education: str = ""
+    active_time: str = Field(default="", description="Boss 活跃度文案，如「今日活跃」")
     description: str = ""
     hr_name: str = ""
     hr_title: str = ""
@@ -97,6 +105,7 @@ class JobRow(SQLModel, table=True):
             "description": self.description,
             "experience": self.experience,
             "education": self.education,
+            "activeTime": self.active_time,
             "matchStatus": "未分析" if score is None else f"{score} 分",
             "matchHigh": score is not None and score >= self.HIGH_MATCH,
             "result": self.result,
@@ -159,9 +168,15 @@ class JobRow(SQLModel, table=True):
 
     @classmethod
     def _apply_filters(
-        cls, stmt, search: str, analysis: str, suitable: str, uid: str = ""
+        cls,
+        stmt,
+        search: str,
+        analysis: str,
+        suitable: str,
+        activity: str = "",
+        uid: str = "",
     ):
-        """按岗位名 / 公司模糊搜，并按分析状态、是否合适筛选；给了 ``uid`` 只看这一个岗位。"""
+        """按岗位名 / 公司模糊搜，并按分析状态、是否合适、活跃度筛选；给了 ``uid`` 只看这一个岗位。"""
         if uid:
             stmt = stmt.where(col(cls.uid) == uid)
         if q := search.strip():
@@ -181,20 +196,29 @@ class JobRow(SQLModel, table=True):
         _, yes, no = cls.SUITABLE_FILTERS
         if suitable in (yes, no):
             stmt = stmt.where(col(cls.suitable).is_(suitable == yes))
+        if activity and activity != cls.ACTIVITY_FILTERS[0]:
+            # 库里存的是接口原文，所以按该档位对应的全部措辞匹配
+            stmt = stmt.where(col(cls.active_time).in_(Activity.wordings(activity)))
         return stmt
 
     @classmethod
     def count(
-        cls, *, search: str = "", analysis: str = "", suitable: str = "", uid: str = ""
+        cls,
+        *,
+        search: str = "",
+        analysis: str = "",
+        suitable: str = "",
+        activity: str = "",
+        uid: str = "",
     ) -> int:
-        """统计岗位数；可按关键字、分析状态、是否合适与主键筛选。"""
+        """统计岗位数；可按关键字、分析状态、是否合适、活跃度与主键筛选。"""
         from sqlalchemy import func
 
         from job.models import db_session
 
         with db_session() as session:
             stmt = select(func.count()).select_from(cls)
-            stmt = cls._apply_filters(stmt, search, analysis, suitable, uid)
+            stmt = cls._apply_filters(stmt, search, analysis, suitable, activity, uid)
             return int(session.exec(stmt).one())
 
     @classmethod
@@ -215,6 +239,7 @@ class JobRow(SQLModel, table=True):
         search: str = "",
         analysis: str = "",
         suitable: str = "",
+        activity: str = "",
         uid: str = "",
         limit: int = 50,
         offset: int = 0,
@@ -224,7 +249,7 @@ class JobRow(SQLModel, table=True):
 
         with db_session() as session:
             stmt = select(cls).order_by(col(cls.created_at).desc())
-            stmt = cls._apply_filters(stmt, search, analysis, suitable, uid)
+            stmt = cls._apply_filters(stmt, search, analysis, suitable, activity, uid)
             rows = session.exec(stmt.offset(offset).limit(limit)).all()
         return cls._with_risk([r.to_dict() for r in rows])
 
