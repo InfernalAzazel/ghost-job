@@ -595,7 +595,7 @@ class ConfigPage:
                     cls._activity_tick(label, index)
                     for index, label in enumerate(Activity.labels())
                 ],
-                justify="space-between",
+                justify="between",
                 width="100%",
                 # 与滑条原点的左右内缩对齐，见 Step 15 的校准
                 padding="0 0.5em",

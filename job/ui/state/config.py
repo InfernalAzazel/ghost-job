@@ -241,13 +241,13 @@ class ConfigState(rx.State):
         self._save()
 
     @rx.event
-    def preview_activity_index(self, value: list[int]):
+    def preview_activity_index(self, value: list[float]):
         """拖动中：只改预览，松手才落库。"""
         if value:
             self.activity_index = int(value[0])
 
     @rx.event
-    def commit_activity_index(self, value: list[int]):
+    def commit_activity_index(self, value: list[float]):
         """松手：落库。"""
         if value:
             self.activity_index = int(value[0])
