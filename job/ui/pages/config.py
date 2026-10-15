@@ -568,9 +568,19 @@ class ConfigPage:
             rx.cond(ConfigState.activity_on, cls._activity_slider()),
         )
 
+    # 滑条滑块宽度：滑块的圆心只能在「轨道两端各让出半个滑块宽度」之间移动
+    THUMB = 12
+    # 「最低活跃要求」两端的档位名要跨出圆点中心，给它留半个最宽档位名的宽度
+    TICK_ROOM = "28px"
+    # 档位名之间不重叠所需的最小宽度（13 档 × 每档 56px 左右）
+    TICK_MIN_WIDTH = "680px"
+    # 刻度行高度：圆点 + 档位名（刻度是绝对定位，不撑高父元素，得留出高度）
+    TICK_ROW_HEIGHT = "28px"
+
     @classmethod
     def _activity_slider(cls) -> rx.Component:
         """最低活跃要求：滑条 + 13 档刻度（点刻度也能选）。"""
+        labels = Activity.labels()
         return rx.vstack(
             cls._field_label("最低活跃要求"),
             rx.hstack(
@@ -580,25 +590,34 @@ class ConfigPage:
                 width="100%",
                 align="center",
             ),
-            rx.slider(
-                value=[ConfigState.activity_index],
-                min=0,
-                max=len(Activity.labels()) - 1,
-                step=1,
-                color_scheme="blue",
-                on_change=ConfigState.preview_activity_index,
-                on_value_commit=ConfigState.commit_activity_index,
+            rx.box(
+                rx.box(
+                    rx.slider(
+                        value=[ConfigState.activity_index],
+                        min=0,
+                        max=len(labels) - 1,
+                        step=1,
+                        color_scheme="blue",
+                        on_change=ConfigState.preview_activity_index,
+                        on_value_commit=ConfigState.commit_activity_index,
+                        width="100%",
+                    ),
+                    rx.box(
+                        *[
+                            cls._activity_tick(label, index)
+                            for index, label in enumerate(labels)
+                        ],
+                        position="relative",
+                        width="100%",
+                        height=cls.TICK_ROW_HEIGHT,
+                    ),
+                    padding=f"0 {cls.TICK_ROOM}",
+                    width="100%",
+                    min_width=cls.TICK_MIN_WIDTH,
+                ),
+                # 卡片窄到放不下 13 档时横向滚动，而不是让档位名叠在一起
+                overflow_x="auto",
                 width="100%",
-            ),
-            rx.hstack(
-                *[
-                    cls._activity_tick(label, index)
-                    for index, label in enumerate(Activity.labels())
-                ],
-                justify="between",
-                width="100%",
-                # 与滑条原点的左右内缩对齐，见 Step 15 的校准
-                padding="0 0.5em",
             ),
             rx.text(ConfigState.activity_hint, font_size="0.8em", color=MUTED),
             spacing="1",
@@ -607,8 +626,15 @@ class ConfigPage:
 
     @classmethod
     def _activity_tick(cls, label: str, index: int) -> rx.Component:
-        """单个刻度：圆点 + 档位名；点一下即选中该档。"""
+        """单个刻度：圆点 + 档位名；点一下即选中该档。
+
+        按档位在总档数里的百分比定位，圆点中心与滑条滑块在同一 x 上；
+        用 ``justify="between"`` 排版会因为各档位名宽度不同而逐档偏移。
+        """
+        total = len(Activity.labels()) - 1
         active = ConfigState.activity_index == index
+        # 圆点中心与滑块圆心对齐：滑块圆心只能在轨道两端各让出半个滑块宽度之间移动
+        offset = f"(100% - {cls.THUMB}px) * {index / total:.6f}"
         return rx.vstack(
             rx.box(
                 width="7px",
@@ -626,6 +652,10 @@ class ConfigPage:
             align="center",
             spacing="1",
             cursor="pointer",
+            position="absolute",
+            top="0",
+            left=f"calc({cls.THUMB // 2}px + {offset})",
+            transform="translateX(-50%)",
             on_click=ConfigState.set_activity_index(index),
         )
 

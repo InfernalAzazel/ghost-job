@@ -196,12 +196,12 @@ class JobRow(SQLModel, table=True):
         _, yes, no = cls.SUITABLE_FILTERS
         if suitable in (yes, no):
             stmt = stmt.where(col(cls.suitable).is_(suitable == yes))
-        if activity and activity != cls.ACTIVITY_FILTERS[0]:
-            # 阈值语义：该档及其更活跃的档位都算命中。库里存的是接口原文，
-            # 所以按这些档位的全部措辞并集匹配。
-            stmt = stmt.where(
-                col(cls.active_time).in_(Activity.wordings_at_least(activity))
-            )
+        # 阈值语义：该档及其更活跃的档位都算命中。库里存的是接口原文，所以按这些档位的
+        # 全部措辞并集匹配；认不出的档位（并集为空）不做过滤，与 ActivityFilter 认不出阈值
+        # 就按「不限」处理保持一致，也避免 IN () 静默返回空表。
+        wordings = Activity.wordings_at_least(activity) if activity else ()
+        if activity and activity != cls.ACTIVITY_FILTERS[0] and wordings:
+            stmt = stmt.where(col(cls.active_time).in_(wordings))
         return stmt
 
     @classmethod

@@ -122,6 +122,21 @@ def test_filter_by_activity_threshold(tmp_db):
     assert JobRow.count(activity="刚刚活跃") == 0
 
 
+def test_filter_by_activity_ignores_unregistered_wordings(tmp_db):
+    """库里存的是接口原文，筛选只按登记过的措辞匹配。
+
+    没登记过的写法（在线类文案、推算出来的近似档位）不参与筛选，这是已知取舍：
+    投递时走 Activity.of 归一化照常判断，只是岗位管理里查不到。用测试把这个边界钉住。
+    """
+    JobRow.record(_job("known", active_time="半年前活跃"))
+    JobRow.record(_job("online_text", active_time="3分钟前在线"))
+    JobRow.record(_job("approximate", active_time="1年内活跃"))
+
+    # 最宽松的档位也只命中登记过的措辞
+    assert [r["uid"] for r in JobRow.list_dicts(activity="半年前活跃")] == ["known"]
+    assert JobRow.count(activity="半年前活跃") == 1
+
+
 def test_find_duplicate_by_id_or_title_company_hr(tmp_db):
     JobRow.record(_job("a", title="AI 工程师", hr_name="张女士"), suitable=False)
 

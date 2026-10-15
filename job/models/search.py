@@ -132,7 +132,7 @@ class SearchConfigRow(SQLModel, table=True):
     )
 
     def to_dict(self) -> dict[str, Any]:
-        """转为配置页 / URL 拼装用的字典（多选已展开为 list）。"""
+        """转为配置页 / URL 拼装用的字典（多选展开为 list，活跃度是单个档位字符串）。"""
         return {
             "query": self.query,
             "job_type": self.job_type,
@@ -193,7 +193,9 @@ class SearchConfigRow(SQLModel, table=True):
     ) -> dict[str, Any]:
         """更新求职配置；未传的参数保持原值。
 
-        ``lists`` 为多选字段（见 ``LIST_FIELDS``），如 ``cities=["广州", "深圳"]``。
+        ``lists`` 为多选字段（见 ``LIST_FIELDS``），如 ``cities=["广州", "深圳"]``；
+        ``activity_min`` 是活跃度的最低档位（空串表示不限），它不是多选字段，
+        所以单独传参、单独入库。
         """
         unknown = set(lists) - set(LIST_FIELDS)
         if unknown:
