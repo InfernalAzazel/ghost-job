@@ -570,12 +570,28 @@ class ConfigPage:
 
     # 滑条滑块宽度：滑块的圆心只能在「轨道两端各让出半个滑块宽度」之间移动
     THUMB = 12
+    # Radix 滑条轨道高度（轨道即整个 slider 元素，圆点要对齐到它的中线）
+    TRACK = 8
+    # 刻度圆点直径（含 2px 边框）：比滑块小一圈，选中档位才显得突出
+    DOT = 9
+    # 刻度圆点边框宽度
+    DOT_BORDER = "2px"
+    # 刻度圆点用白底：实心色圆点压在同色轨道上会隐形，白底才读得出刻度
+    DOT_FILL = CARD
+    # 未达阈值的圆点边框色（已达阈值的边框同填充色，整颗纯白压在蓝色轨道上）
+    DOT_IDLE = "#cdd4de"
     # 「最低活跃要求」两端的档位名要跨出圆点中心，给它留半个最宽档位名的宽度
     TICK_ROOM = "28px"
     # 档位名之间不重叠所需的最小宽度（13 档 × 每档 56px 左右）
     TICK_MIN_WIDTH = "680px"
     # 刻度行高度：圆点 + 档位名（刻度是绝对定位，不撑高父元素，得留出高度）
-    TICK_ROW_HEIGHT = "28px"
+    TICK_ROW_HEIGHT = "36px"
+    # 刻度行要上提这么多，圆点才落在轨道中线上（轨道整段 + 半个圆点）
+    TICK_LIFT = f"{(TRACK + DOT) / -2:g}px"
+    # 滑块可见圆的直径：thumb 12px，::after 再向外扩 2px（白底 + 1px 灰边就是它画的）
+    THUMB_CIRCLE = THUMB + 4
+    # 可见圆比轨道高，上下各溢出这么多（另留 2px 给聚焦时的描边）
+    THUMB_ROOM = f"{(THUMB_CIRCLE - TRACK) // 2 + 2}px"
 
     @classmethod
     def _activity_slider(cls) -> rx.Component:
@@ -610,6 +626,8 @@ class ConfigPage:
                         position="relative",
                         width="100%",
                         height=cls.TICK_ROW_HEIGHT,
+                        # 上提，让圆点落在轨道中线上（刻度行在滑条下方，默认是错位的）
+                        margin_top=cls.TICK_LIFT,
                     ),
                     padding=f"0 {cls.TICK_ROOM}",
                     width="100%",
@@ -617,6 +635,9 @@ class ConfigPage:
                 ),
                 # 卡片窄到放不下 13 档时横向滚动，而不是让档位名叠在一起
                 overflow_x="auto",
+                # 但 overflow-x 为 auto 时，overflow-y 会跟着计算成 auto，
+                # 于是比轨道高出半圈的滑块会被裁掉上半部分；在顶部留出这段空间
+                padding_top=cls.THUMB_ROOM,
                 width="100%",
             ),
             rx.text(ConfigState.activity_hint, font_size="0.8em", color=MUTED),
@@ -633,14 +654,19 @@ class ConfigPage:
         """
         total = len(Activity.labels()) - 1
         active = ConfigState.activity_index == index
+        reached = ConfigState.activity_index >= index
         # 圆点中心与滑块圆心对齐：滑块圆心只能在轨道两端各让出半个滑块宽度之间移动
         offset = f"(100% - {cls.THUMB}px) * {index / total:.6f}"
         return rx.vstack(
             rx.box(
-                width="7px",
-                height="7px",
+                width=f"{cls.DOT}px",
+                height=f"{cls.DOT}px",
                 border_radius="50%",
-                bg=rx.cond(ConfigState.activity_index >= index, ACCENT, BORDER),
+                bg=cls.DOT_FILL,
+                border=f"{cls.DOT_BORDER} solid "
+                + rx.cond(reached, cls.DOT_FILL, cls.DOT_IDLE),
+                # 选中那一档由滑块自己表示，圆点让位，免得两个圆叠在一起
+                visibility=rx.cond(active, "hidden", "visible"),
             ),
             rx.text(
                 label,
@@ -650,7 +676,7 @@ class ConfigPage:
                 font_weight=rx.cond(active, "600", "400"),
             ),
             align="center",
-            spacing="1",
+            spacing="2",
             cursor="pointer",
             position="absolute",
             top="0",
