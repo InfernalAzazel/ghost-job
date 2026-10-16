@@ -172,7 +172,7 @@ jobs:
           plist=src-tauri/target/release/bundle/macos/ghost-job.app/Contents/Info.plist
           got=$(plutil -extract CFBundleShortVersionString raw "$plist")
           if [[ "$got" != "$APP_VERSION" ]]; then
-            echo "::error::Info.plist 版本 $got，期望 $APP_VERSION"
+            echo "::error::Info.plist 版本 ${got}，期望 $APP_VERSION"
             exit 1
           fi
 
@@ -183,7 +183,7 @@ jobs:
           deb=$(ls src/dist/*.deb | head -1)
           got=$(dpkg-deb -f "$deb" Version)
           if [[ "$got" != "$APP_VERSION" ]]; then
-            echo "::error::deb 版本 $got，期望 $APP_VERSION"
+            echo "::error::deb 版本 ${got}，期望 $APP_VERSION"
             exit 1
           fi
 
