@@ -430,7 +430,7 @@ BOSS 直聘每天约 150 次沟通上限，Ghost Job 会在达到上限时自动
 全部在本机 `~/.ghost-job/` 目录：岗位、配置与聊天记录在 `db/`，简历在 `resumes/`，Chrome 登录状态在 `chrome-profile/`，日志在 `logs/`（提 Issue 时可以附上，注意去掉个人信息）。目录下的 `ghost-job.db` 是早期版本用的数据库，现在只在首次启动时被读取一次用于导入旧数据，之后不再改动，可以留着备份。
 
 **遇到问题怎么反馈？**
-到 [Issues](https://github.com/InfernalAzazel/ghost-job/issues) 描述你遇到的问题，附上版本号、操作系统和运行日志（注意去掉手机号、简历等个人信息）。源码仓库不公开，参与开发请先开 Issue 说明。
+到 [Issues](https://github.com/InfernalAzazel/ghost-job/issues) 描述你遇到的问题，附上版本号、操作系统和运行日志（注意去掉手机号、简历等个人信息）。
 
 ## 加入交流群
 
