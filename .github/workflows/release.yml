@@ -10,8 +10,13 @@
 #   - 从 tag 写版本号：它的 `__VERSION__` 是拿项目版本号去替换 tag 名，方向是反的
 #   - 更新日志：在私有仓库里，读出来塞进 `releaseBody`
 #
-# 维护方式：源码真相是本文件（私有仓库 `ghost-job-src/.github/workflows/release.yml`），
-# 改完用 `scripts/release.sh` 同步过去；别直接在公有仓库改，下次同步会被覆盖。
+# 维护方式：源码真相是本文件，存在私有仓库 `ghost-job-src/.github/release-workflow.yml`，
+# 改完用 `scripts/release.sh` 复制到公有仓库 `.github/workflows/` 下运行；别直接在公有仓库改，
+# 下次同步会被覆盖。
+#
+# 为什么在私有仓库里不放在 `.github/workflows/` 下：那里只有公有仓库会跑它（`SRC_TOKEN` 和
+# 免费额度都在公有仓库），而放在 `workflows/` 下会让编辑器把它当本仓库的工作流校验，报一堆
+# 「Context access might be invalid: SRC_TOKEN」这类假警报（私有仓库里确实没有这个 secret）。
 #
 # 触发方式只有两种，都需要仓库写权限，外部人无法触发，`SRC_TOKEN` 不会被滥用：
 #   - 推送 vX.Y.Z tag：版本号取自 tag，源码取私有仓库的同名 tag（可复现）
@@ -85,6 +90,7 @@ jobs:
 
     steps:
       - name: Resolve version
+        id: resolve
         # 输入用 env 传，不拼进脚本，免得版本号里的字符被 shell 解释
         env:
           INPUT_VERSION: ${{ inputs.version }}
@@ -104,11 +110,16 @@ jobs:
           if [[ "$EVENT_NAME" == "push" || "$INPUT_PUBLISH" == "true" ]]; then
             publish="true"
           fi
-          echo "PUBLISH=$publish" >> "$GITHUB_ENV"
-          if [[ "$publish" == "true" ]]; then
-            echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
-            echo "RELEASE_NAME=Ghost Job v$version" >> "$GITHUB_ENV"
-          fi
+
+          # 发版与否、Release 的 tag 和标题都走 step output：后面的表达式读
+          # steps.resolve.outputs.*，是静态可校验的引用；写进 $GITHUB_ENV 再读 env.* 的话，
+          # IDE 的 actions 插件和 actionlint 都看不出这些变量存在。
+          # APP_VERSION 例外，它只在 shell 里用，走 $GITHUB_ENV 是标准做法。
+          {
+            echo "publish=$publish"
+            echo "release_tag=v$version"
+            echo "release_name=Ghost Job v$version"
+          } >> "$GITHUB_OUTPUT"
 
           echo "本次构建版本：$version"
           echo "是否发版：$publish"
@@ -205,7 +216,7 @@ jobs:
       # 下面两个分支只差四个输入：发版那个要 tagName/releaseName 才会创建 Release，
       # 演练那个三个都不传（官方文档说这样就是"只构建"）。改动时两边都要动。
       - name: Build and publish
-        if: env.PUBLISH == 'true'
+        if: steps.resolve.outputs.publish == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -213,20 +224,21 @@ jobs:
           projectPath: src
           tauriScript: pnpm tauri
           args: --bundles ${{ matrix.bundles }}
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: ${{ env.RELEASE_NAME }}
+          tagName: ${{ steps.resolve.outputs.release_tag }}
+          releaseName: ${{ steps.resolve.outputs.release_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
           # 非 draft、非 prerelease 才会被 `releases/latest` 指到，应用里的新版本提醒就靠它
           releaseDraft: false
           prerelease: false
-          # 没配 Tauri 自带的 updater（新版本提醒是自己查 latest release），不需要 latest.json
-          uploadUpdaterJson: false
+          # 没配 Tauri 自带的 updater（新版本提醒是自己查 latest release），不需要 latest.json；
+          # 这个输入默认是 true，必须显式关掉
+          includeUpdaterJson: false
           retryAttempts: 2
           # 默认产物名带空格（Ghost Job_0.7.1_aarch64.dmg），统一成跟旧版一致的形状
-          releaseAssetNamePattern: "ghost-job_[version]_[arch][_setup].[ext]"
+          assetNamePattern: "ghost-job_[version]_[arch][_setup].[ext]"
 
       - name: Build only (rehearsal)
-        if: env.PUBLISH != 'true'
+        if: steps.resolve.outputs.publish != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -234,11 +246,42 @@ jobs:
           projectPath: src
           tauriScript: pnpm tauri
           args: --bundles ${{ matrix.bundles }}
-          uploadUpdaterJson: false
+          includeUpdaterJson: false
           retryAttempts: 2
-          releaseAssetNamePattern: "ghost-job_[version]_[arch][_setup].[ext]"
-          # 不发版，产物留在 workflow artifact 里，好下载下来看
-          uploadWorkflowArtifacts: true
+          assetNamePattern: "ghost-job_[version]_[arch][_setup].[ext]"
+
+      - name: Upload installers (rehearsal)
+        # 不发版时 tauri-action 只把产物留在磁盘上（它的 tagName/releaseName/releaseId
+        # 都不传就不会创建 Release），所以用官方的 upload-artifact 收走，好下载下来验证
+        if: steps.resolve.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghost-job-${{ matrix.name }}
+          path: |
+            src/src-tauri/target/release/bundle/**/*.dmg
+            src/src-tauri/target/release/bundle/**/*.msi
+            src/src-tauri/target/release/bundle/**/*.exe
+            src/src-tauri/target/release/bundle/**/*.AppImage
+            src/src-tauri/target/release/bundle/**/*.deb
+            src/src-tauri/target/release/bundle/**/*.rpm
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Ensure release notes
+        # tauri-action 只负责把安装包传进 Release；正文如果要被它之外的路径创建过（比如上次
+        # 失败留下的空 Release，标题和正文是 tag 注解），这里按私有仓库里的更新日志覆盖一次，
+        # 保证正文只有一个来源。幂等，正常发布时是空操作。跑在 Linux 腿上一遍就够。
+        if: steps.resolve.outputs.publish == 'true' && matrix.name == 'linux-x86_64'
+        working-directory: src
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 从 output 传进来，这一步就是自包含的，不用回头猜哪个 env 是谁写的
+          RELEASE_TAG: ${{ steps.resolve.outputs.release_tag }}
+          RELEASE_NAME: ${{ steps.resolve.outputs.release_name }}
+        run: |
+          set -euo pipefail
+          gh release edit "$RELEASE_TAG" --title "$RELEASE_NAME" --notes-file release-notes.md
+          echo "已把 ${RELEASE_TAG} 的标题和正文对齐到更新日志"
 
       - name: List installers
         # 无论成功失败都列一遍，dmg 有没有打出来一眼能看到
