@@ -407,76 +407,23 @@ v0.2.0 调整了本地数据结构。升级前请先退出 Ghost Job，删除用
 **每天能投多少个？**
 BOSS 直聘每天约 150 次沟通上限，Ghost Job 会在达到上限时自动停止。
 
-**打开后显示「Ghost Job 正在启动，请稍候…」怎么办？**
-这是正常现象，不用重装。Ghost Job 每次启动都要在后台加载 AI 和数据服务，加载完成前会先显示这个启动页，加载完后自动进入工作台，一般几秒到 1 分钟，电脑配置越好越快。旧版本在这时会在右下角提示「Cannot connect to server」，同样等一会儿就会消失。如果等了 3 分钟以上还没进入，请关闭程序重新打开；仍然不行的话，请带上日志提 Issue。
-
-![启动中](assets/screenshots/backend-connecting.png)
-
 **支持哪些系统？**
 已在 Windows 10 / 11 和 macOS 上测试可正常使用。不支持 Windows 7。Linux 提供了安装包，但尚未完整测试，遇到问题欢迎反馈。
-
-**Windows 打开时提示缺少 `python312.dll` 怎么办？**
-先升级到最新版本。v0.4.5 及更早的部分版本打包时，有时会把 `python312.dll` 放错位置，从 v0.4.6 起打包时会自动检查，不会再出现。临时解决办法：把安装目录下 `python\python\` 里的 `python312.dll`、`python3.dll`、`vcruntime140.dll`、`vcruntime140_1.dll` 复制到 `ghost-job.exe` 所在的目录。
-
-升级后仍然报错，就可能是电脑里的 Python 环境冲突。常见情况是之前用 Python 官网安装包装过其他版本的 Python（例如 3.13），系统环境变量里的 Python 路径干扰了 Ghost Job 自带的运行环境。如果你平时需要使用 Python，建议改用 [uv](https://docs.astral.sh/uv/) 管理 Python，让各个 Python 版本互相隔离：
-
-1. 在「设置 → 应用」里卸载用官网安装包装的 Python，并检查「系统属性 → 环境变量」，删除 `Path` 里残留的 Python 路径，以及 `PYTHONHOME`、`PYTHONPATH` 变量（如果有）
-2. 打开 PowerShell，安装 uv：
-
-   ```powershell
-   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-   ```
-
-   国内网络下载慢的话，也可以到 [GitHub Releases](https://github.com/astral-sh/uv/releases) 下载 `uv-x86_64-pc-windows-msvc.zip`，解压后把 `uv.exe` 所在目录加入 `Path`
-3. 关闭并重新打开 PowerShell，运行 `uv --version`，能看到版本号就说明安装成功
-4. 以后需要 Python 时用 uv 安装，例如 `uv python install 3.13`，它不会修改系统环境变量，也就不会再影响 Ghost Job
-5. 重新打开 Ghost Job 即可正常使用
-
-更多安装方式见 [uv 官方安装文档](https://docs.astral.sh/uv/getting-started/installation/)。
 
 **macOS 提示「无法验证开发者」怎么办？**
 在应用上右键选择「打开」，或前往「系统设置 → 隐私与安全性」点击「仍要打开」。
 
 **我的数据存在哪里？**
-全部在本机 `~/.ghost-job/` 目录：岗位与配置在 `ghost-job.db`，简历在 `resumes/`，Chrome 登录状态在 `chrome-profile/`，后台日志在 `logs/backend.log`（提 Issue 时可以附上，注意去掉个人信息）。
+全部在本机 `~/.ghost-job/` 目录：岗位、配置与聊天记录在 `db/`，简历在 `resumes/`，Chrome 登录状态在 `chrome-profile/`，日志在 `logs/`（提 Issue 时可以附上，注意去掉个人信息）。目录下的 `ghost-job.db` 是早期版本用的数据库，现在只在首次启动时被读取一次用于导入旧数据，之后不再改动，可以留着备份。
+
+**遇到问题怎么反馈？**
+到 [Issues](https://github.com/InfernalAzazel/ghost-job/issues) 描述你遇到的问题，附上版本号、操作系统和运行日志（注意去掉手机号、简历等个人信息）。源码仓库不公开，参与开发请先开 Issue 说明。
 
 ## 加入交流群
 
 使用中遇到问题、有功能建议，或想和其他求职者交流经验，欢迎扫码添加作者微信，备注「Ghost Job」，拉你进交流群。
 
 <img src="assets/wechat.jpg" width="240" alt="作者微信" />
-
-## 参与开发
-
-基于 [Reflex](https://reflex.dev) + [reflex-desktop](https://github.com/FarhanAliRaza/reflex-desktop)（Tauri）构建，浏览器自动化使用 [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)，AI 能力基于 [Pydantic AI](https://ai.pydantic.dev)。
-
-```bash
-uv sync
-# 前置：Rust（rustup 稳定版）、Tauri CLI（cargo install tauri-cli --locked）
-uv run reflex-desktop doctor --bundle
-uv run python -m job        # 桌面窗口 + 热重载
-uv run pytest -q            # 运行测试
-```
-
-版本号只写在 `job/__init__.py` 的 `__version__`，`pyproject.toml` 从这里读取。推送 `v*` 标签后，GitHub Actions 会自动打包 Windows / macOS / Linux 安装包并发布到 Releases。
-
-### 提交 PR 的规则
-
-请**先开 Issue，再提交 PR**，避免多人重复修同一个问题，或者改完才发现方向不对：
-
-1. **先开 Issue**：到 [Issues](https://github.com/InfernalAzazel/ghost-job/issues) 描述你遇到的问题，尽量包含：
-   - 做了什么操作，期望的结果和实际的结果
-   - 运行日志或终端里的报错信息（截图或复制文字都可以，注意去掉手机号、简历等个人信息）
-   - 使用的版本号和操作系统（如 v0.4.2 / macOS 15）
-   - 功能建议请说明使用场景，以及你打算怎么实现
-2. **确认后再动手**：等作者回复确认是问题、或同意这个功能方向后再开始修改
-3. **提交 PR**：
-   - 在 PR 描述里写上 `Closes #Issue 编号`，并说明改了什么、怎么验证的
-   - 一个 PR 只做一件事，不要夹带无关的格式化或重构
-   - 提交前运行 `uv run pytest -q` 确保测试通过；修复问题或新增功能请补上对应的测试
-   - 涉及界面的改动，请附上修改前后的截图
-
-错别字、文档链接失效这类很小的修改，可以直接提交 PR，不用先开 Issue。
 
 ## Star 趋势
 

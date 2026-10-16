@@ -1,26 +1,50 @@
-name: Release CI
+# 发布工作流。**这个文件跑在公有仓库 `ghost-job` 上**，源码在私有仓库 `ghost-job-src`：
+# 公开仓库的 Actions 不计费，所以构建放这边跑，私有代码由 `SRC_TOKEN`（只读）拉取。
+#
+# 维护方式：源码真相是本文件（私有仓库 `ghost-job-src/.github/workflows/release.yml`），
+# 改完用 `scripts/release.sh` 同步过去；别直接在公有仓库改，会下次同步时被覆盖。
+#
+# 触发方式只有两种，都需要仓库写权限，外部人无法触发，`SRC_TOKEN` 不会被滥用：
+#   - 推送 vX.Y.Z tag：版本号取自 tag，源码取私有仓库的同名 tag（可复现）
+#   - Actions 页手动 Run workflow：自己填版本号，源码 ref 默认 main
+#
+# 事前准备（公有仓库 Settings）：
+#   - Secrets 加 `SRC_TOKEN`：细粒度 PAT，只授 `ghost-job-src` 的 Contents: Read
+#   - 更新日志写在私有仓库 `.github/release-notes/vX.Y.Z.md`，没有就只发一行下载提示
+
+name: Release
 
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号（不带 v，如 0.7.1）
+        required: true
+      source_ref:
+        description: ghost-job-src 的 ref（tag/分支/commit）；留空则用触发的 ref
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
+# 发布不互相取消：构建到一半被取消会浪费一次四平台构建
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
-  REFLEX_TELEMETRY_ENABLED: "false"
+  SOURCE_REPO: InfernalAzazel/ghost-job-src
   CARGO_TERM_COLOR: always
-  PYTHONUTF8: "1"
-  PYTHONIOENCODING: utf-8
+  RUST_BACKTRACE: 1
+  # 无 FUSE 的 runner 上，AppImage 依赖的 linuxdeploy 要这样跑
+  APPIMAGE_EXTRACT_AND_RUN: "1"
 
 jobs:
-  build-stage:
+  build:
     name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -29,19 +53,56 @@ jobs:
         include:
           - name: linux-x86_64
             os: ubuntu-22.04
+            bundles: appimage,deb,rpm
           - name: macos-aarch64
             os: macos-latest
+            # DMG 由 hdiutil 单独打（Tauri 自带的 dmg 打包在 CI 上不稳）
+            bundles: app
           - name: macos-x86_64
             os: macos-15-intel
+            bundles: app
           - name: windows-x86_64
             os: windows-latest
+            bundles: msi,nsis
     defaults:
       run:
         shell: bash
 
     steps:
-      - name: Check out code
+      - name: Resolve version
+        # 输入用 env 传，不拼进脚本，免得版本号里的字符被 shell 解释
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION:-${GITHUB_REF_NAME#v}}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::版本号 '$version' 不是合法 semver"
+            exit 1
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+          echo "本次构建版本：$version"
+
+      - name: Check out source (private)
         uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ inputs.source_ref || github.ref_name }}
+          token: ${{ secrets.SRC_TOKEN }}
+          path: src
+          fetch-depth: 1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: src/pnpm-lock.yaml
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -49,168 +110,166 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev build-essential curl wget file \
-            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev rpm
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Tauri CLI
-        uses: taiki-e/install-action@v2
-        with:
-          tool: tauri-cli
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          python-version: "3.12"
-          enable-cache: true
-
-      - name: Install Python dependencies
-        run: |
-          uv sync --frozen --no-dev
-          uv export --frozen --no-dev --no-hashes --no-emit-project -o requirements.txt
-
-      - name: Resolve version
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-          else
-            echo "APP_VERSION=$(uv run python -c 'from job import __version__;print(__version__)')" >> "$GITHUB_ENV"
-          fi
-
-      - name: Export frontend and scaffold Tauri project
-        run: uv run reflex export --frontend-only
-
-      - name: Apply version and icons
-        working-directory: tauri/src-tauri
-        run: |
-          uv run python - <<'EOF'
-          import json, os, pathlib, sys
-          conf = pathlib.Path("tauri.conf.json")
-          data = json.loads(conf.read_text())
-          data["version"] = os.environ["APP_VERSION"]
-          # bundle_dmg.sh is flaky on hosted macOS runners; the DMG is built separately
-          if sys.platform == "darwin":
-              data.setdefault("bundle", {})["targets"] = ["app"]
-          # The exe loads python312.dll at startup, so it must sit next to the exe.
-          # Tauri keeps resources in a HashMap: a file matched by two entries (the "python"
-          # directory and a DLL mapping) lands in a random one per build, so the DLLs are
-          # mapped from a separate copy (see "Stage Windows DLLs") that nothing else matches.
-          if sys.platform == "win32":
-              resources = data["bundle"]["resources"]
-              resources.pop("python/python/python3*.dll", None)
-              for dll in ("python312.dll", "python3.dll", "vcruntime140.dll", "vcruntime140_1.dll"):
-                  resources[f"win-dlls/{dll}"] = dll
-          conf.write_text(json.dumps(data, indent=2) + "\n")
-          EOF
-          cargo tauri icon ../../assets/icon.png
-
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: tauri/src-tauri -> target
+          workspaces: src/src-tauri -> target
           key: ${{ matrix.name }}
 
-      - name: Stage Windows DLLs
-        if: runner.os == 'Windows'
-        run: |
-          uv run python - <<'EOF'
-          import shutil
-          from pathlib import Path
-          from reflex_desktop import runtime
-          src_tauri = Path("tauri/src-tauri")
-          runtime.assemble(src_tauri, Path.cwd())
-          out = src_tauri / "win-dlls"
-          out.mkdir(exist_ok=True)
-          for dll in ("python312.dll", "python3.dll", "vcruntime140.dll", "vcruntime140_1.dll"):
-              shutil.copy2(src_tauri / "python" / "python" / dll, out / dll)
-          EOF
+      - name: Install frontend dependencies
+        working-directory: src
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply version
+        working-directory: src
+        run: node .github/scripts/set-version.mjs "$APP_VERSION"
 
       - name: Build app bundle
-        run: uv run reflex-desktop build --bundle --skip-export
+        working-directory: src
+        run: pnpm tauri build --bundles ${{ matrix.bundles }}
 
       - name: Create DMG
         if: runner.os == 'macOS'
+        working-directory: src
         run: |
-          bundle=tauri/src-tauri/target/release/bundle
+          set -euo pipefail
+          bundle=src-tauri/target/release/bundle
           arch=$([[ "$(uname -m)" == arm64 ]] && echo aarch64 || echo x64)
-          dmg="$bundle/dmg/Ghost Job_${APP_VERSION}_${arch}.dmg"
+          dmg="$bundle/dmg/ghost-job_${APP_VERSION}_${arch}.dmg"
           mkdir -p "$bundle/dmg" dmg-staging
-          ditto "$bundle/macos/Ghost Job.app" "dmg-staging/Ghost Job.app"
+          ditto "$bundle/macos/ghost-job.app" "dmg-staging/ghost-job.app"
           ln -s /Applications dmg-staging/Applications
           for i in 1 2 3 4 5; do
             hdiutil create -volname "Ghost Job" -srcfolder dmg-staging -ov -format UDZO "$dmg" && break
-            echo "hdiutil failed (attempt $i), retrying..."
+            echo "hdiutil 第 $i 次失败，重试…"
             sleep 15
           done
           test -f "$dmg"
 
       - name: Collect installers
+        working-directory: src
         run: |
+          set -euo pipefail
           mkdir -p dist
-          bundle=tauri/src-tauri/target/release/bundle
+          bundle=src-tauri/target/release/bundle
           find "$bundle" -maxdepth 2 -type f \
             \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
                -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
             -exec cp {} dist/ \;
           ls -la dist
 
+      - name: Verify macOS bundle version
+        if: runner.os == 'macOS'
+        working-directory: src
+        run: |
+          set -euo pipefail
+          # 界面上显示、以及新版本提醒比对的都是这个版本，注入失败必须当场发现
+          plist=src-tauri/target/release/bundle/macos/ghost-job.app/Contents/Info.plist
+          got=$(plutil -extract CFBundleShortVersionString raw "$plist")
+          if [[ "$got" != "$APP_VERSION" ]]; then
+            echo "::error::Info.plist 版本 $got，期望 $APP_VERSION"
+            exit 1
+          fi
+
+      - name: Verify Linux bundle version
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          deb=$(ls src/dist/*.deb | head -1)
+          got=$(dpkg-deb -f "$deb" Version)
+          if [[ "$got" != "$APP_VERSION" ]]; then
+            echo "::error::deb 版本 $got，期望 $APP_VERSION"
+            exit 1
+          fi
+
       - name: Verify Windows installers
         if: runner.os == 'Windows'
-        shell: pwsh
         run: |
-          $exe = Get-ChildItem dist -Filter *-setup.exe | Select-Object -First 1
-          if (-not ((& 7z l $exe.FullName) -match '\spython312\.dll$')) {
-            throw "$($exe.Name): python312.dll is not next to ghost-job.exe"
-          }
-          $msi = Get-ChildItem dist -Filter *.msi | Select-Object -First 1
-          $target = Join-Path $PWD "msi-check"
-          Start-Process msiexec -Wait -ArgumentList "/a `"$($msi.FullName)`" /qn TARGETDIR=`"$target`""
-          $exePath = Get-ChildItem $target -Recurse -Filter ghost-job.exe | Select-Object -First 1
-          if (-not $exePath -or -not (Test-Path (Join-Path $exePath.DirectoryName "python312.dll"))) {
-            throw "$($msi.Name): python312.dll is not next to ghost-job.exe"
-          }
+          set -euo pipefail
+          for pattern in 'src/dist/*.msi' 'src/dist/*-setup.exe'; do
+            file=$(ls $pattern | head -1)
+            if [[ -z "$file" ]]; then
+              echo "::error::没有生成 $pattern"
+              exit 1
+            fi
+            if [[ "$(basename "$file")" != *"$APP_VERSION"* ]]; then
+              echo "::error::$file 文件名里没有版本号 $APP_VERSION"
+              exit 1
+            fi
+          done
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ghost-job-${{ matrix.name }}
-          path: dist/*
-          if-no-files-found: error
-          retention-days: 3
-
-  release-stage:
-    needs: build-stage
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Build release notes
+      - name: Stage release notes
+        # 更新日志只在私有仓库里，挑一个 runner 顺手传出来，发布任务就不用再拉一次源码
+        if: matrix.name == 'linux-x86_64'
+        working-directory: src
         run: |
+          set -euo pipefail
+          notes=".github/release-notes/v${APP_VERSION}.md"
           {
             echo "下载与你系统对应的安装包即可使用；运行前请确保已安装 Google Chrome。"
-            notes=".github/release-notes/${GITHUB_REF_NAME}.md"
             if [[ -f "$notes" ]]; then
               echo
               cat "$notes"
             fi
           } > release-notes.md
+          cat release-notes.md
 
-      - name: Download artifacts
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghost-job-${{ matrix.name }}
+          path: src/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload release notes
+        if: matrix.name == 'linux-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: src/release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION:-${GITHUB_REF_NAME#v}}"
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Download installers
         uses: actions/download-artifact@v4
         with:
           pattern: ghost-job-*
           path: artifacts
           merge-multiple: true
 
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: notes
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Ghost Job ${{ github.ref_name }}
-          body_path: release-notes.md
+          # 非 draft、非 prerelease 才会被 `releases/latest` 指到，应用里的新版本提醒就靠它
+          tag_name: v${{ env.APP_VERSION }}
+          name: Ghost Job v${{ env.APP_VERSION }}
+          body_path: notes/release-notes.md
+          draft: false
           prerelease: false
-          generate_release_notes: true
+          make_latest: true
           files: artifacts/**
