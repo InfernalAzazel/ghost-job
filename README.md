@@ -13,7 +13,7 @@
 [![下载量](https://img.shields.io/github/downloads/InfernalAzazel/ghost-job/total?label=%E4%B8%8B%E8%BD%BD%E9%87%8F)](https://github.com/InfernalAzazel/ghost-job/releases)
 [![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-PolyForm%20Noncommercial-blue)](LICENSE)
 
-[下载安装](https://github.com/InfernalAzazel/ghost-job/releases) · [快速开始](#快速开始) · [求职数据实测](#作者求职数据实测) · [常见问题](#常见问题) · [加入交流群](#加入交流群)
+[下载安装](https://github.com/InfernalAzazel/ghost-job/releases) · [快速开始](#快速开始) · [求职数据实测](#作者求职数据实测) · [常见问题](#常见问题) · [加入交流群](#加入交流群) · [请作者喝杯咖啡](#请作者喝杯咖啡)
 
 如果 Ghost Job 帮你省下了投递时间，欢迎点击右上角的 ⭐ **Star** 支持一下，让更多求职者看到它
 
@@ -437,6 +437,12 @@ BOSS 直聘每天约 150 次沟通上限，Ghost Job 会在达到上限时自动
 使用中遇到问题、有功能建议，或想和其他求职者交流经验，欢迎扫码添加作者微信，备注「Ghost Job」，拉你进交流群。
 
 <img src="assets/wechat.jpg" width="240" alt="作者微信" />
+
+## 请作者喝杯咖啡
+
+Ghost Job 免费、开源、没有广告，也没有商业化打算。如果它帮你省下了投递的时间，或者让你拿到了面试，欢迎扫码请作者喝杯咖啡。
+
+<img src="assets/donate.jpg" width="240" alt="请作者喝杯咖啡" />
 
 ## Star 趋势
 
