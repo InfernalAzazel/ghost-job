@@ -9,6 +9,8 @@
 #   - 取私有源码：它不认识私库，`SRC_TOKEN` 这步得留
 #   - 从 tag 写版本号：它的 `__VERSION__` 是拿项目版本号去替换 tag 名，方向是反的
 #   - 更新日志：在私有仓库里，读出来塞进 `releaseBody`
+# 另有一件它做不到的，放在末尾的 `finalize` job：macOS 上只要 bundle 目录里有 .app
+# （dmg 得由它打出来，删不掉），它就会把整个目录压成 .app.tar.gz 一起传上来。
 #
 # 维护方式：源码真相是本文件，存在私有仓库 `ghost-job-src/.github/release-workflow.yml`，
 # 改完用 `scripts/release.sh` 复制到公有仓库 `.github/workflows/` 下运行；别直接在公有仓库改，
@@ -66,6 +68,11 @@ jobs:
   build:
     name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    # 给末尾的 finalize job 用。四个腿算出来的取值相同（同一份输入算的），矩阵 job 的
+    # output 取先跑完那个腿的，所以确定
+    outputs:
+      publish: ${{ steps.resolve.outputs.publish }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
     strategy:
       fail-fast: false
       matrix:
@@ -234,8 +241,11 @@ jobs:
           # 这个输入默认是 true，必须显式关掉
           includeUpdaterJson: false
           retryAttempts: 2
-          # 默认产物名带空格（Ghost Job_0.7.1_aarch64.dmg），统一成跟旧版一致的形状
-          assetNamePattern: "ghost-job_[version]_[arch][_setup].[ext]"
+          # 不设 assetNamePattern：产物名就走 productName 推导的默认形状
+          # （Ghost Job_0.7.1_aarch64.dmg、Ghost Job_0.7.1_x64-setup.exe、
+          # Ghost Job-0.7.1-1.x86_64.rpm 这一族），与 v0.7.0 的历史产物同形。
+          # 之前设成 ghost-job_[version]_[arch][_setup].[ext] 会把连字符换成下划线，
+          # 让下载名跟历史断代
 
       - name: Build only (rehearsal)
         if: steps.resolve.outputs.publish != 'true'
@@ -248,7 +258,6 @@ jobs:
           args: --bundles ${{ matrix.bundles }}
           includeUpdaterJson: false
           retryAttempts: 2
-          assetNamePattern: "ghost-job_[version]_[arch][_setup].[ext]"
 
       - name: Upload installers (rehearsal)
         # 不发版时 tauri-action 只把产物留在磁盘上（它的 tagName/releaseName/releaseId
@@ -283,6 +292,33 @@ jobs:
           gh release edit "$RELEASE_TAG" --title "$RELEASE_NAME" --notes-file release-notes.md
           echo "已把 ${RELEASE_TAG} 的标题和正文对齐到更新日志"
 
+      - name: Assert the bundle name
+        # 断言挡在发版前：productName 一旦被写回 ghost-job，macOS 装出来就是 ghost-job.app，
+        # 用户的旧版 "Ghost Job.app" 不会被覆盖，桌面上会并排出现两个应用；Windows 那边同一个
+        # 名字还决定安装目录和推导出来的 WiX 升级码，改了就从"覆盖升级"变成"并存安装"。
+        # 旧版（v0.7.0 及更早）用的就是 "Ghost Job"，包内可执行文件叫 ghost-job。
+        if: runner.os == 'macOS'
+        working-directory: src
+        run: |
+          set -euo pipefail
+          bundle=src-tauri/target/release/bundle/macos
+          app="$bundle/Ghost Job.app"
+          if [[ ! -d "$app" ]]; then
+            echo "::error::没找到 'Ghost Job.app'，实际产物："
+            ls -1 "$bundle" || true
+            exit 1
+          fi
+          # 两个名字来源不同：CFBundleName 跟着 productName，可执行文件名跟着 mainBinaryName
+          name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$app/Contents/Info.plist")"
+          exe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+          echo "CFBundleName     = $name"
+          echo "CFBundleExecutable = $exe"
+          [[ "$name" == "Ghost Job" ]] \
+            || { echo "::error::CFBundleName 是 '$name'，期望 'Ghost Job'（见 tauri.conf.json 的 productName）"; exit 1; }
+          [[ "$exe" == "ghost-job" ]] \
+            || { echo "::error::CFBundleExecutable 是 '$exe'，期望 'ghost-job'（见 tauri.conf.json 的 mainBinaryName）"; exit 1; }
+          ls -1 "$app/Contents/MacOS/"
+
       - name: List installers
         # 无论成功失败都列一遍，dmg 有没有打出来一眼能看到
         if: always()
@@ -293,3 +329,34 @@ jobs:
             \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
                -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
             -exec ls -lh {} \; | sed 's/^/  /' || true
+
+  finalize:
+    # tauri-action 在 macOS 上只要 bundle 目录里有 .app（dmg 就是由它打出来的，躲不开）就会把
+    # 整个目录压成 .app.tar.gz 一并传进 Release，跟传了什么 `--bundles` 无关。应用没配 Tauri
+    # 自带的 updater（新版本提醒是自己查 latest release），这两个压缩包对用户没有用途，只会让
+    # 下载页比 v0.7.0 多两个看不懂的文件。等四个腿都传完再删，顺便列出最终产物核对。
+    needs: build
+    if: needs.build.outputs.publish == 'true' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prune archives we do not ship
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          # 没有 checkout，gh 推不出仓库，所以 --repo 显式给
+          # 无匹配时 grep 退出码是 1，用 || true 兜住，免得被 set -e 当成失败
+          stale="$(gh release view "$RELEASE_TAG" --repo "$REPO" --json assets \
+            --jq '.assets[].name' | grep -E '\.app\.tar\.gz(\.sig)?$' || true)"
+          if [[ -z "$stale" ]]; then
+            echo "没有 .app.tar.gz 需要清理"
+          else
+            while IFS= read -r name; do
+              gh release delete-asset "$RELEASE_TAG" "$name" --repo "$REPO" --yes
+            done <<< "$stale"
+          fi
+          echo "== $RELEASE_TAG 最终产物 =="
+          gh release view "$RELEASE_TAG" --repo "$REPO" --json assets \
+            --jq '.assets[] | "  \(.name)"'
