@@ -287,9 +287,12 @@ jobs:
           # 从 output 传进来，这一步就是自包含的，不用回头猜哪个 env 是谁写的
           RELEASE_TAG: ${{ steps.resolve.outputs.release_tag }}
           RELEASE_NAME: ${{ steps.resolve.outputs.release_name }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh release edit "$RELEASE_TAG" --title "$RELEASE_NAME" --notes-file release-notes.md
+          # --repo 必须显式给：这一步的 cwd 是私有源码的 checkout，gh 会照它的 origin
+          # 推成 ghost-job-src，然后去那里找 Release——私有仓库没有 Release，报 release not found
+          gh release edit "$RELEASE_TAG" --repo "$REPO" --title "$RELEASE_NAME" --notes-file release-notes.md
           echo "已把 ${RELEASE_TAG} 的标题和正文对齐到更新日志"
 
       - name: Assert the bundle name
