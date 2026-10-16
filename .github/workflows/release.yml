@@ -1,12 +1,22 @@
 # 发布工作流。**这个文件跑在公有仓库 `ghost-job` 上**，源码在私有仓库 `ghost-job-src`：
 # 公开仓库的 Actions 不计费，所以构建放这边跑，私有代码由 `SRC_TOKEN`（只读）拉取。
 #
+# 构建和发版交给 Tauri 官方的 `tauri-apps/tauri-action`：四个平台各自构建完，把安装包直接
+# 传到同一个 Release，省掉产物在 artifact 里中转的一圈（原来那套是 build → upload-artifact
+# → download-artifact → softprops/action-gh-release 五个步骤两个 job）。
+#
+# 它替不掉的三件事，所以仍然自己写，改动时留意：
+#   - 取私有源码：它不认识私库，`SRC_TOKEN` 这步得留
+#   - 从 tag 写版本号：它的 `__VERSION__` 是拿项目版本号去替换 tag 名，方向是反的
+#   - 更新日志：在私有仓库里，读出来塞进 `releaseBody`
+#
 # 维护方式：源码真相是本文件（私有仓库 `ghost-job-src/.github/workflows/release.yml`），
-# 改完用 `scripts/release.sh` 同步过去；别直接在公有仓库改，会下次同步时被覆盖。
+# 改完用 `scripts/release.sh` 同步过去；别直接在公有仓库改，下次同步会被覆盖。
 #
 # 触发方式只有两种，都需要仓库写权限，外部人无法触发，`SRC_TOKEN` 不会被滥用：
 #   - 推送 vX.Y.Z tag：版本号取自 tag，源码取私有仓库的同名 tag（可复现）
-#   - Actions 页手动 Run workflow：自己填版本号，源码 ref 默认 main
+#   - Actions 页手动 Run workflow：自己填版本号；`publish` 选 false 则只构建不发版，
+#     用来验证四平台产物（尤其 macOS 的 dmg）能不能打出来，产物作为 workflow artifact 留下
 #
 # 事前准备（公有仓库 Settings）：
 #   - Secrets 加 `SRC_TOKEN`：细粒度 PAT，只授 `ghost-job-src` 的 Contents: Read
@@ -27,6 +37,10 @@ on:
         description: ghost-job-src 的 ref（tag/分支/commit）；留空则用触发的 ref
         required: false
         default: ""
+      publish:
+        description: 创建 Release 并上传安装包；关掉则只构建（用来验证产物）
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -51,16 +65,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # 每个平台各自原生构建，不传 --target，产物就都落在 target/release/bundle 下
           - name: linux-x86_64
             os: ubuntu-22.04
             bundles: appimage,deb,rpm
           - name: macos-aarch64
             os: macos-latest
-            # DMG 由 hdiutil 单独打（Tauri 自带的 dmg 打包在 CI 上不稳）
-            bundles: app
+            # dmg 由 Tauri 自带的打包器产出；不稳的话见下面的 retryAttempts
+            bundles: app,dmg
           - name: macos-x86_64
             os: macos-15-intel
-            bundles: app
+            bundles: app,dmg
           - name: windows-x86_64
             os: windows-latest
             bundles: msi,nsis
@@ -73,6 +88,8 @@ jobs:
         # 输入用 env 传，不拼进脚本，免得版本号里的字符被 shell 解释
         env:
           INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           version="${INPUT_VERSION:-${GITHUB_REF_NAME#v}}"
@@ -81,7 +98,20 @@ jobs:
             exit 1
           fi
           echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+
+          # tag 推送一定发版；手动触发看 publish 输入
+          publish="false"
+          if [[ "$EVENT_NAME" == "push" || "$INPUT_PUBLISH" == "true" ]]; then
+            publish="true"
+          fi
+          echo "PUBLISH=$publish" >> "$GITHUB_ENV"
+          if [[ "$publish" == "true" ]]; then
+            echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
+            echo "RELEASE_NAME=Ghost Job v$version" >> "$GITHUB_ENV"
+          fi
+
           echo "本次构建版本：$version"
+          echo "是否发版：$publish"
 
       - name: Check out source (private)
         uses: actions/checkout@v4
@@ -129,83 +159,30 @@ jobs:
         working-directory: src
         run: node .github/scripts/set-version.mjs "$APP_VERSION"
 
-      - name: Build app bundle
-        working-directory: src
-        run: pnpm tauri build --bundles ${{ matrix.bundles }}
-
-      - name: Create DMG
-        if: runner.os == 'macOS'
+      - name: Assert the injected version
+        # 界面显示和新版本提醒比对的都是它，注入失败必须当场发现——所以放在构建前，
+        # 而不是像以前那样等四十分钟构建完再验产物
         working-directory: src
         run: |
           set -euo pipefail
-          bundle=src-tauri/target/release/bundle
-          arch=$([[ "$(uname -m)" == arm64 ]] && echo aarch64 || echo x64)
-          dmg="$bundle/dmg/ghost-job_${APP_VERSION}_${arch}.dmg"
-          mkdir -p "$bundle/dmg" dmg-staging
-          ditto "$bundle/macos/ghost-job.app" "dmg-staging/ghost-job.app"
-          ln -s /Applications dmg-staging/Applications
-          for i in 1 2 3 4 5; do
-            hdiutil create -volname "Ghost Job" -srcfolder dmg-staging -ov -format UDZO "$dmg" && break
-            echo "hdiutil 第 $i 次失败，重试…"
-            sleep 15
-          done
-          test -f "$dmg"
-
-      - name: Collect installers
-        working-directory: src
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          bundle=src-tauri/target/release/bundle
-          find "$bundle" -maxdepth 2 -type f \
-            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
-               -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
-            -exec cp {} dist/ \;
-          ls -la dist
-
-      - name: Verify macOS bundle version
-        if: runner.os == 'macOS'
-        working-directory: src
-        run: |
-          set -euo pipefail
-          # 界面上显示、以及新版本提醒比对的都是这个版本，注入失败必须当场发现
-          plist=src-tauri/target/release/bundle/macos/ghost-job.app/Contents/Info.plist
-          got=$(plutil -extract CFBundleShortVersionString raw "$plist")
-          if [[ "$got" != "$APP_VERSION" ]]; then
-            echo "::error::Info.plist 版本 ${got}，期望 $APP_VERSION"
-            exit 1
-          fi
-
-      - name: Verify Linux bundle version
-        if: runner.os == 'Linux'
-        run: |
-          set -euo pipefail
-          deb=$(ls src/dist/*.deb | head -1)
-          got=$(dpkg-deb -f "$deb" Version)
-          if [[ "$got" != "$APP_VERSION" ]]; then
-            echo "::error::deb 版本 ${got}，期望 $APP_VERSION"
-            exit 1
-          fi
-
-      - name: Verify Windows installers
-        if: runner.os == 'Windows'
-        run: |
-          set -euo pipefail
-          for pattern in 'src/dist/*.msi' 'src/dist/*-setup.exe'; do
-            file=$(ls $pattern | head -1)
-            if [[ -z "$file" ]]; then
-              echo "::error::没有生成 $pattern"
-              exit 1
-            fi
-            if [[ "$(basename "$file")" != *"$APP_VERSION"* ]]; then
-              echo "::error::$file 文件名里没有版本号 $APP_VERSION"
-              exit 1
-            fi
-          done
+          # [package] 的 version 顶格，依赖的版本都是缩进的，整行匹配不会误伤
+          grep -qxF "version = \"${APP_VERSION}\"" src-tauri/Cargo.toml
+          # 两个 JSON 用 node 读，避免在依赖的版本号里碰到巧合的同名值
+          node -e '
+            const want = process.argv[1];
+            const fs = require("node:fs");
+            for (const file of ["src-tauri/tauri.conf.json", "package.json"]) {
+              const got = JSON.parse(fs.readFileSync(file, "utf8")).version;
+              if (got !== want) {
+                console.error(`::error::${file} 的版本是 ${got}，期望 ${want}`);
+                process.exit(1);
+              }
+            }
+          ' "$APP_VERSION"
+          echo "三处版本号都是 ${APP_VERSION}"
 
       - name: Stage release notes
-        # 更新日志只在私有仓库里，挑一个 runner 顺手传出来，发布任务就不用再拉一次源码
-        if: matrix.name == 'linux-x86_64'
+        id: notes
         working-directory: src
         run: |
           set -euo pipefail
@@ -217,59 +194,59 @@ jobs:
               cat "$notes"
             fi
           } > release-notes.md
+          # Release 正文是多行，用 heredoc 塞进 step output 给 tauri-action 用
+          {
+            echo "body<<RELEASE_BODY_EOF"
+            cat release-notes.md
+            echo "RELEASE_BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
           cat release-notes.md
 
-      - name: Upload installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: ghost-job-${{ matrix.name }}
-          path: src/dist/*
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload release notes
-        if: matrix.name == 'linux-x86_64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-notes
-          path: src/release-notes.md
-          if-no-files-found: error
-          retention-days: 7
-
-  release:
-    name: release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Resolve version
+      # 下面两个分支只差四个输入：发版那个要 tagName/releaseName 才会创建 Release，
+      # 演练那个三个都不传（官方文档说这样就是"只构建"）。改动时两边都要动。
+      - name: Build and publish
+        if: env.PUBLISH == 'true'
+        uses: tauri-apps/tauri-action@v0
         env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          version="${INPUT_VERSION:-${GITHUB_REF_NAME#v}}"
-          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
-
-      - name: Download installers
-        uses: actions/download-artifact@v4
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          pattern: ghost-job-*
-          path: artifacts
-          merge-multiple: true
-
-      - name: Download release notes
-        uses: actions/download-artifact@v4
-        with:
-          name: release-notes
-          path: notes
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
+          projectPath: src
+          tauriScript: pnpm tauri
+          args: --bundles ${{ matrix.bundles }}
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: ${{ env.RELEASE_NAME }}
+          releaseBody: ${{ steps.notes.outputs.body }}
           # 非 draft、非 prerelease 才会被 `releases/latest` 指到，应用里的新版本提醒就靠它
-          tag_name: v${{ env.APP_VERSION }}
-          name: Ghost Job v${{ env.APP_VERSION }}
-          body_path: notes/release-notes.md
-          draft: false
+          releaseDraft: false
           prerelease: false
-          make_latest: true
-          files: artifacts/**
+          # 没配 Tauri 自带的 updater（新版本提醒是自己查 latest release），不需要 latest.json
+          uploadUpdaterJson: false
+          retryAttempts: 2
+          # 默认产物名带空格（Ghost Job_0.7.1_aarch64.dmg），统一成跟旧版一致的形状
+          releaseAssetNamePattern: "ghost-job_[version]_[arch][_setup].[ext]"
+
+      - name: Build only (rehearsal)
+        if: env.PUBLISH != 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: src
+          tauriScript: pnpm tauri
+          args: --bundles ${{ matrix.bundles }}
+          uploadUpdaterJson: false
+          retryAttempts: 2
+          releaseAssetNamePattern: "ghost-job_[version]_[arch][_setup].[ext]"
+          # 不发版，产物留在 workflow artifact 里，好下载下来看
+          uploadWorkflowArtifacts: true
+
+      - name: List installers
+        # 无论成功失败都列一遍，dmg 有没有打出来一眼能看到
+        if: always()
+        working-directory: src
+        run: |
+          echo "== 打包产物 =="
+          find src-tauri/target/release/bundle -maxdepth 2 -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
+               -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
+            -exec ls -lh {} \; | sed 's/^/  /' || true
