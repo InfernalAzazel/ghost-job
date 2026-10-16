@@ -16,6 +16,12 @@
 # 改完用 `scripts/release.sh` 复制到公有仓库 `.github/workflows/` 下运行；别直接在公有仓库改，
 # 下次同步会被覆盖。
 #
+# action 版本钉在「恰好切到 node24 的最低主版本」，不追最新：node20 已被 runner 强制换运行时并逐
+# job 告警（2025-09-19 的 deprecation，github.blog/changelog），但升主版本可能改行为，取最低的
+# 那个风险最小。当前 checkout / setup-node / pnpm-action-setup 为 v5，upload-artifact 为 v6
+# ——upload-artifact 的 v5 仍是 node20，必须 v6。改这几个版本后，正式发版前先
+# `scripts/release.sh <版本> --rehearse` 把四个平台验一遍。
+#
 # 为什么在私有仓库里不放在 `.github/workflows/` 下：那里只有公有仓库会跑它（`SRC_TOKEN` 和
 # 免费额度都在公有仓库），而放在 `workflows/` 下会让编辑器把它当本仓库的工作流校验，报一堆
 # 「Context access might be invalid: SRC_TOKEN」这类假警报（私有仓库里确实没有这个 secret）。
@@ -132,7 +138,7 @@ jobs:
           echo "是否发版：$publish"
 
       - name: Check out source (private)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ env.SOURCE_REPO }}
           ref: ${{ inputs.source_ref || github.ref_name }}
@@ -141,12 +147,12 @@ jobs:
           fetch-depth: 1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 11
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
@@ -263,7 +269,7 @@ jobs:
         # 不发版时 tauri-action 只把产物留在磁盘上（它的 tagName/releaseName/releaseId
         # 都不传就不会创建 Release），所以用官方的 upload-artifact 收走，好下载下来验证
         if: steps.resolve.outputs.publish != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ghost-job-${{ matrix.name }}
           path: |
