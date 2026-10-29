@@ -8,6 +8,8 @@
 
 按你的求职方向自动筛选岗位，AI 对比简历判断匹配度，只把简历投给真正合适的公司。
 
+<h3 align="center">在 AI 冲击旧行业的浪潮里，在新旧交替的变革中，<br />无论前路多么黑暗，这个世界的角落里，总有一盏灯为你点亮。</h3>
+
 [![GitHub Stars](https://img.shields.io/github/stars/InfernalAzazel/ghost-job?style=flat&logo=github&label=Stars)](https://github.com/InfernalAzazel/ghost-job/stargazers)
 [![最新版本](https://img.shields.io/github/v/release/InfernalAzazel/ghost-job?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC)](https://github.com/InfernalAzazel/ghost-job/releases/latest)
 [![下载量](https://img.shields.io/github/downloads/InfernalAzazel/ghost-job/total?label=%E4%B8%8B%E8%BD%BD%E9%87%8F)](https://github.com/InfernalAzazel/ghost-job/releases)
