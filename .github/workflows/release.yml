@@ -327,6 +327,10 @@ jobs:
           [[ "$exe" == "ghost-job" ]] \
             || { echo "::error::CFBundleExecutable 是 '$exe'，期望 'ghost-job'（见 tauri.conf.json 的 mainBinaryName）"; exit 1; }
           ls -1 "$app/Contents/MacOS/"
+          # 只有链接器签名、没有整包签名的 .app 在 Apple Silicon 上会被报「已损坏」且无法放行（v1.5.0）
+          codesign --verify --deep --strict "$app" \
+            || { echo "::error::'Ghost Job.app' 没有完整签名，检查 tauri.conf.json 的 bundle.macOS.signingIdentity 是否为 \"-\""; exit 1; }
+          codesign -dvvv "$app" 2>&1 | grep -E '^(Signature|Sealed Resources)'
 
       - name: List installers
         # 无论成功失败都列一遍，dmg 有没有打出来一眼能看到
