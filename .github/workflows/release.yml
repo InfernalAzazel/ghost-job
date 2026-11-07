@@ -9,8 +9,11 @@
 #   - 取私有源码：它不认识私库，`SRC_TOKEN` 这步得留
 #   - 从 tag 写版本号：它的 `__VERSION__` 是拿项目版本号去替换 tag 名，方向是反的
 #   - 更新日志：在私有仓库里，读出来塞进 `releaseBody`
-# 另有一件它做不到的，放在末尾的 `finalize` job：macOS 上只要 bundle 目录里有 .app
-# （dmg 得由它打出来，删不掉），它就会把整个目录压成 .app.tar.gz 一起传上来。
+#
+# 应用内自动更新用 Tauri 自带的 updater：`createUpdaterArtifacts` 让每个平台额外产出带签名的
+# 更新包（macOS 的 .app.tar.gz、Windows 的 -setup.exe/.msi、Linux 的 .AppImage，各配一个 .sig），
+# tauri-action 把四个腿的更新包汇总成 Release 里的 `latest.json`，应用从
+# `releases/latest/download/latest.json` 取。末尾的 `finalize` job 核对它确实生成了。
 #
 # 维护方式：源码真相是本文件，存在私有仓库 `ghost-job-src/.github/release-workflow.yml`，
 # 改完用 `scripts/release.sh` 复制到公有仓库 `.github/workflows/` 下运行；别直接在公有仓库改，
@@ -33,6 +36,9 @@
 #
 # 事前准备（公有仓库 Settings）：
 #   - Secrets 加 `SRC_TOKEN`：细粒度 PAT，只授 `ghost-job-src` 的 Contents: Read
+#   - Secrets 加 `TAURI_SIGNING_PRIVATE_KEY`：更新包签名私钥（`tauri signer generate` 生成的
+#     文件内容），对应的公钥写在 tauri.conf.json 的 `plugins.updater.pubkey`；私钥设了密码时
+#     再加 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。私钥丢了已安装的版本就再也收不到自动更新
 #   - 更新日志写在私有仓库 `.github/release-notes/vX.Y.Z.md`，没有就只发一行下载提示
 
 name: Release
@@ -205,6 +211,16 @@ jobs:
           ' "$APP_VERSION"
           echo "三处版本号都是 ${APP_VERSION}"
 
+      - name: Assert the signing key
+        # 没有私钥时 createUpdaterArtifacts 会让构建在最后一步才失败，这里提前挡住
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo "::error::公有仓库缺少 secret TAURI_SIGNING_PRIVATE_KEY（更新包签名私钥）"
+            exit 1
+          fi
+
       - name: Stage release notes
         id: notes
         working-directory: src
@@ -233,6 +249,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: src
           tauriScript: pnpm tauri
@@ -240,12 +258,13 @@ jobs:
           tagName: ${{ steps.resolve.outputs.release_tag }}
           releaseName: ${{ steps.resolve.outputs.release_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
-          # 非 draft、非 prerelease 才会被 `releases/latest` 指到，应用里的新版本提醒就靠它
+          # 非 draft、非 prerelease 才会被 `releases/latest` 指到，新版本提醒和自动更新都靠它
           releaseDraft: false
           prerelease: false
-          # 没配 Tauri 自带的 updater（新版本提醒是自己查 latest release），不需要 latest.json；
-          # 这个输入默认是 true，必须显式关掉
-          includeUpdaterJson: false
+          # 汇总各平台更新包生成 latest.json；Windows 同时有 msi 和 nsis，自动更新用 nsis
+          # （下载页最常用的就是 -setup.exe）
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
           retryAttempts: 2
           # 不设 assetNamePattern：产物名就走 productName 推导的默认形状
           # （Ghost Job_0.7.1_aarch64.dmg、Ghost Job_0.7.1_x64-setup.exe、
@@ -258,6 +277,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: src
           tauriScript: pnpm tauri
@@ -344,15 +365,12 @@ jobs:
             -exec ls -lh {} \; | sed 's/^/  /' || true
 
   finalize:
-    # tauri-action 在 macOS 上只要 bundle 目录里有 .app（dmg 就是由它打出来的，躲不开）就会把
-    # 整个目录压成 .app.tar.gz 一并传进 Release，跟传了什么 `--bundles` 无关。应用没配 Tauri
-    # 自带的 updater（新版本提醒是自己查 latest release），这两个压缩包对用户没有用途，只会让
-    # 下载页比 v0.7.0 多两个看不懂的文件。等四个腿都传完再删，顺便列出最终产物核对。
+    # 四个腿都传完后核对自动更新要用的 latest.json 和各平台签名都在，再列出最终产物
     needs: build
     if: needs.build.outputs.publish == 'true' && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - name: Prune archives we do not ship
+      - name: Check updater manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -360,16 +378,13 @@ jobs:
         run: |
           set -euo pipefail
           # 没有 checkout，gh 推不出仓库，所以 --repo 显式给
-          # 无匹配时 grep 退出码是 1，用 || true 兜住，免得被 set -e 当成失败
-          stale="$(gh release view "$RELEASE_TAG" --repo "$REPO" --json assets \
-            --jq '.assets[].name' | grep -E '\.app\.tar\.gz(\.sig)?$' || true)"
-          if [[ -z "$stale" ]]; then
-            echo "没有 .app.tar.gz 需要清理"
-          else
-            while IFS= read -r name; do
-              gh release delete-asset "$RELEASE_TAG" "$name" --repo "$REPO" --yes
-            done <<< "$stale"
-          fi
+          gh release download "$RELEASE_TAG" --repo "$REPO" --pattern latest.json --output latest.json \
+            || { echo "::error::$RELEASE_TAG 没有 latest.json，已安装的版本收不到自动更新"; exit 1; }
+          cat latest.json
+          for platform in darwin-aarch64 darwin-x86_64 windows-x86_64 linux-x86_64; do
+            jq -e --arg p "$platform" '.platforms[$p].signature | length > 0' latest.json > /dev/null \
+              || { echo "::error::latest.json 缺少 $platform 的更新包或签名"; exit 1; }
+          done
           echo "== $RELEASE_TAG 最终产物 =="
           gh release view "$RELEASE_TAG" --repo "$REPO" --json assets \
             --jq '.assets[] | "  \(.name)"'
