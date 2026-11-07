@@ -21,7 +21,23 @@
 
 </div>
 
-![工作台](assets/screenshots/workbench.png)
+![Ghost Job 工作台：BOSS 直聘自动投递的运行日志、今日投递数和关键词轮换](assets/screenshots/workbench.png)
+
+## Ghost Job 是什么
+
+Ghost Job 是一款**免费的 BOSS 直聘自动投递桌面软件**，支持 Windows、macOS 和 Linux。它按你设定的岗位关键词和城市自动搜索岗位，用 AI（默认 DeepSeek）阅读职位描述、对比简历打出匹配度，只向合适的岗位打招呼；HR 回复后，AI 还能自动回复消息、发送简历和作品。所有数据都保存在本机，不需要写代码，安装后填好 API Key 就能用。
+
+Ghost Job is a free desktop app (Windows / macOS / Linux) that automates job applications on BOSS Zhipin (BOSS直聘), China's largest recruiting platform. It uses an LLM to screen job descriptions against your resume, applies only to matching jobs, and replies to recruiters automatically.
+
+| 项目 | 说明 |
+| --- | --- |
+| 适用平台 | BOSS 直聘（zhipin.com） |
+| 软件类型 | 桌面应用，无需编程，也不是浏览器插件或脚本 |
+| 支持系统 | Windows 10 / 11、macOS（Apple 芯片与 Intel）、Linux |
+| 价格 | 免费，无广告，仅限个人非商业使用 |
+| AI 模型 | DeepSeek、通义千问、Kimi、智谱、OpenAI 或本地 Ollama |
+| 核心功能 | 自动投递、AI 岗位筛选、简历匹配度、AI 自动回复 HR、自动发简历与作品、查企业风险、求职数据分析 |
+| 数据存储 | 全部保存在本机，不上传服务器 |
 
 ## 自动投递效果
 
@@ -447,6 +463,21 @@ BOSS 直聘的风控大多是**访问频率**触发的：短时间内搜索、�
 封号通常持续 **1 天**，到期自动解封；但**一个月内多次被封，封禁时间会逐次追加**。被封后先在工作台停止自动投递和自动回复，解封后按上面的方式降低频率再用。
 
 ## 常见问题
+
+**有没有免费的 BOSS 直聘自动投递工具？**
+Ghost Job 就是一款免费的 BOSS 直聘自动投递软件，支持 Windows、macOS 和 Linux。它会按关键词和城市自动搜岗位，用 AI 判断岗位是否适合你、和简历匹配多少分，只给合适的岗位打招呼，还能自动回复 HR。从 [Releases](https://github.com/InfernalAzazel/ghost-job/releases) 下载安装即可，不需要写代码。
+
+**Ghost Job 收费吗？**
+软件本身免费、没有广告。AI 功能需要你自己的大模型 API Key，费用按大模型服务商的价格计算；默认的 DeepSeek 价格很低，也可以用本地 Ollama 完全不花钱。
+
+**BOSS 直聘怎么自动打招呼、自动回复 HR？**
+在 Ghost Job 的工作台点「开始自动投递」，它会逐个查看岗位，符合条件就自动点「立即沟通」打招呼；点「开始自动回复」后，HR 发来消息时 AI 会结合你的简历和岗位信息回复，HR 要简历时自动发送附件简历。详见 [第四步：开始自动投递](#第四步开始自动投递) 和 [第六步：自动回复 HR 消息](#第六步自动回复-hr-消息)。
+
+**用自动投递工具会被 BOSS 直聘封号吗？**
+任何自动化工具都有风险，风控主要由访问频率和 HR 投诉触发。Ghost Job 会模拟真人节奏（随机停顿、分批休息）、达到每天约 150 次沟通上限时自动停止，并用 AI 筛掉不对口的岗位减少投诉。按 [防封指南](#防封指南) 使用（城市不超过 5 个、每天投两轮）能把风险降到最低。
+
+**Ghost Job 和普通的投递脚本、浏览器插件有什么不同？**
+Ghost Job 是安装即用的桌面软件，不用装油猴、不用配置运行环境。它不只是批量打招呼：投递前由 AI 阅读职位描述并对比简历打分，只投合适的；投递后还能 AI 自动回复 HR、发送简历和作品、查企业风险，并统计投递和回复的转化率。
 
 **会重复投递同一个岗位吗？**
 不会。看过的岗位都会记录下来，再次遇到同一个岗位（职位相同，或招聘标题、公司、HR 都相同）会直接跳过，不再重复调用 AI；之前已经沟通过的岗位也会跳过。工作台顶部的统计卡会分别显示本次投递、本次重复和本次跳过的数量。
