@@ -139,12 +139,44 @@ Ghost Job is a free desktop app (Windows / macOS / Linux) that automates job app
 
 打开 **配置中心 → AI 服务**：
 
-1. 接口地址：使用 DeepSeek 时留空即可；使用其他服务时填写它的 OpenAI 兼容地址，例如本地 Ollama 填 `http://localhost:11434/v1`
+1. 接口地址：使用 DeepSeek 时留空即可；使用其他服务时填写它的 OpenAI 兼容地址，例如本地 Ollama 填 `http://127.0.0.1:11434/v1`
 2. 粘贴对应服务的 API Key（本地 Ollama 可随意填写）
 3. 点击「获取模型列表」，选择一个模型；接口不提供模型列表时，直接在模型框里输入模型名回车即可
 4. 点击「测试连接」，看到「连接成功」即可
 
 ![AI 服务](assets/screenshots/config-ai.png)
+
+#### 使用本地 Ollama（免费、离线）
+
+不想花 API 费用，可以用 [Ollama](https://ollama.com/download) 在本机跑模型：
+
+1. 安装并打开 Ollama（桌面版会在后台自动运行服务，终端里再执行 `ollama serve` 提示 `address already in use` 属于正常）
+2. 下载模型：`ollama pull qwen3:8b`
+3. 在 **配置中心 → AI 服务** 填写：
+
+   | 项目 | 填写 |
+   | --- | --- |
+   | 接口地址 | `http://127.0.0.1:11434/v1` |
+   | API Key | 随意填写，例如 `ollama` |
+   | 模型 | 点击「获取模型列表」，选 `qwen3:8b` |
+
+4. 点击「测试连接」，看到「连接成功」即可
+
+作者实测配置，岗位复核、自动回复都很流畅：
+
+| 项目 | 配置 |
+| --- | --- |
+| 电脑 | MacBook Pro（Apple M2 Max，12 核 CPU / 30 核 GPU） |
+| 内存 | 32 GB |
+| 系统 | macOS 26 |
+| Ollama | 0.40 |
+| 模型 | `qwen3:8b`（约 5.2 GB） |
+
+使用建议：
+
+- **接口地址用 `127.0.0.1`，不要用 `localhost`**：开着 Clash 等系统代理时，`localhost` 的请求可能被转给代理，导致「获取失败：Connection error」
+- **选支持工具调用（tool calling）的模型**：岗位复核、自动回复需要模型按格式输出，推荐 `qwen3`、`qwen2.5`、`llama3.1` 等；1.5B 这类太小的模型容易输出格式不对
+- **配置较低的电脑**：内存 16 GB 及以下建议换 `qwen3:4b` 或 `qwen2.5:7b`；第一次调用要加载模型会比较慢，可以先在终端执行一次 `ollama run qwen3:8b` 预热。软件已为本地模型放宽了超时（一般请求 3 分钟，岗位复核 2 分钟，求职分析解读 5 分钟）
 
 ### 第二步：设置求职条件
 
@@ -547,7 +579,7 @@ Ghost Job 是安装即用的桌面软件，不用装油猴、不用配置运行�
 先看运行日志：AI 没挑中任何项目时不会发，通常是简介没写清楚和 HR 问的方向的关系，把项目类型、领域、技术栈写进简介再试；这个项目已经发给过这位 HR 时也不会重复发。日志里出现「发图片失败」时，按提示检查图片是否还在、格式是否是 png / jpg / jpeg / gif。
 
 **除了 DeepSeek 还能用哪些大模型？**
-任何兼容 OpenAI 接口的服务都可以，例如通义千问、Kimi、智谱、OpenAI。在 **配置中心 → AI 服务** 的「接口地址」填写该服务的地址，再填 API Key、获取模型列表即可（不支持获取列表的接口，直接手动输入模型名）；用本地 Ollama 时填 `http://localhost:11434/v1`，API Key 随意填写。接口地址留空就是 DeepSeek。
+任何兼容 OpenAI 接口的服务都可以，例如通义千问、Kimi、智谱、OpenAI。在 **配置中心 → AI 服务** 的「接口地址」填写该服务的地址，再填 API Key、获取模型列表即可（不支持获取列表的接口，直接手动输入模型名）；用本地 Ollama 时填 `http://127.0.0.1:11434/v1`，API Key 随意填写，详见[使用本地 Ollama](#使用本地-ollama免费离线)。接口地址留空就是 DeepSeek。
 
 **每天能投多少个？**
 BOSS 直聘每天约 150 次沟通上限，Ghost Job 会在达到上限时自动停止。
