@@ -146,9 +146,22 @@ Ghost Job is a free desktop app (Windows / macOS / Linux) that automates job app
 
 ![AI 服务](assets/screenshots/config-ai.png)
 
+#### DeepSeek 要花多少钱
+
+作者实测（按 DeepSeek 官方价格）：
+
+| 阶段 | 说明 | 费用 |
+| --- | --- | --- |
+| 第一次跑 | 新关键词下的岗位基本都要 AI 复核，一般会投满当天上限 | 约 1～2 元 |
+| 之后每天 | 进入存量，大部分岗位已处理过，只复核新岗位、回复 HR 消息 | 约 0.05 元（5 分钱） |
+
+按一年算：第一次 1～2 元 + 0.05 元 × 364 天 ≈ 18 元，**全年约 20 元，平均每月不到 2 元**。换一批新的关键词或城市时，相当于又一次「第一次跑」，再多花 1～2 元。
+
 #### 使用本地 Ollama（免费、离线）
 
-不想花 API 费用，可以用 [Ollama](https://ollama.com/download) 在本机跑模型：
+> **作者不推荐用本地模型日常投递，配置较低的电脑更不建议。** 本地能跑得动的模型（8B 左右）结构化输出不够稳定，岗位复核、查企业等功能会报「Exceeded maximum output retries」（模型没按格式回答）或「请求超时」。作者在 M2 Max / 32 GB 的电脑上用 `qwen3:8b` 实测也会出现这类错误。DeepSeek 一年大约 20 元，比折腾本地模型省心，请优先用 DeepSeek。
+
+只想离线体验、能接受偶尔失败时，可以用 [Ollama](https://ollama.com/download) 在本机跑模型：
 
 1. 安装并打开 Ollama（桌面版会在后台自动运行服务，终端里再执行 `ollama serve` 提示 `address already in use` 属于正常）
 2. 下载模型：`ollama pull qwen3:8b`
@@ -162,7 +175,7 @@ Ghost Job is a free desktop app (Windows / macOS / Linux) that automates job app
 
 4. 点击「测试连接」，看到「连接成功」即可
 
-作者实测配置，岗位复核、自动回复都很流畅：
+作者实测配置：速度没问题，但结构化输出仍不稳定，查企业等任务会报「Exceeded maximum output retries」，所以作者自己日常也用 DeepSeek：
 
 | 项目 | 配置 |
 | --- | --- |
@@ -176,7 +189,9 @@ Ghost Job is a free desktop app (Windows / macOS / Linux) that automates job app
 
 - **接口地址用 `127.0.0.1`，不要用 `localhost`**：开着 Clash 等系统代理时，`localhost` 的请求可能被转给代理，导致「获取失败：Connection error」
 - **选支持工具调用（tool calling）的模型**：岗位复核、自动回复需要模型按格式输出，推荐 `qwen3`、`qwen2.5`、`llama3.1` 等；1.5B 这类太小的模型容易输出格式不对
-- **配置较低的电脑**：内存 16 GB 及以下建议换 `qwen3:4b` 或 `qwen2.5:7b`；第一次调用要加载模型会比较慢，可以先在终端执行一次 `ollama run qwen3:8b` 预热。软件已为本地模型放宽了超时（一般请求 3 分钟，岗位复核 2 分钟，求职分析解读 5 分钟）
+- **模型不要太小**：4B 及以下的模型格式出错更频繁，不建议用；内存 16 GB 及以下的电脑请直接用 DeepSeek
+- **遇到「Exceeded maximum output retries」**：这是模型没按格式回答，重试一次有时能过；经常出现就换回 DeepSeek
+- **先预热**：第一次调用要加载模型会比较慢，可以先在终端执行一次 `ollama run qwen3:8b`。软件已为本地模型放宽了超时（一般请求 3 分钟，岗位复核 2 分钟，求职分析解读 5 分钟）
 
 ### 第二步：设置求职条件
 
@@ -513,7 +528,7 @@ BOSS 直聘的风控大多是**访问频率**触发的：短时间内搜索、�
 Ghost Job 就是一款免费的 BOSS 直聘自动投递软件，支持 Windows、macOS 和 Linux。它会按关键词和城市自动搜岗位，用 AI 判断岗位是否适合你、和简历匹配多少分，只给合适的岗位打招呼，还能自动回复 HR。从 [Releases](https://github.com/InfernalAzazel/ghost-job/releases) 下载安装即可，不需要写代码。
 
 **Ghost Job 收费吗？**
-软件本身免费、没有广告。AI 功能需要你自己的大模型 API Key，费用按大模型服务商的价格计算；默认的 DeepSeek 价格很低，也可以用本地 Ollama 完全不花钱。
+软件本身免费、没有广告。AI 功能需要你自己的大模型 API Key，费用按大模型服务商的价格计算；默认的 DeepSeek 价格很低：第一次跑约 1～2 元，之后每天约 5 分钱，全年约 20 元，详见 [DeepSeek 要花多少钱](#deepseek-要花多少钱)。本地 Ollama 完全不花钱，但结构化输出不稳定，不推荐日常使用。
 
 **BOSS 直聘怎么自动打招呼、自动回复 HR？**
 在 Ghost Job 的工作台点「开始自动投递」，它会逐个查看岗位，符合条件就自动点「立即沟通」打招呼；点「开始自动回复」后，HR 发来消息时 AI 会结合你的简历和岗位信息回复，HR 要简历时自动发送附件简历。详见 [第四步：开始自动投递](#第四步开始自动投递) 和 [第六步：自动回复 HR 消息](#第六步自动回复-hr-消息)。
