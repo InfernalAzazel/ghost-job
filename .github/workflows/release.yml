@@ -80,6 +80,9 @@ env:
   RUST_BACKTRACE: 1
   # 无 FUSE 的 runner 上，AppImage 依赖的 linuxdeploy 要这样跑
   APPIMAGE_EXTRACT_AND_RUN: "1"
+  # linuxdeploy 会 strip AppDir 里所有 ELF，包括 resources 里 Nuitka 带进来的 Python 动态库；
+  # 那些库由较新的工具链编出（含 .relr.dyn 段），ubuntu-22.04 的 strip 不认识，直接失败
+  NO_STRIP: "true"
 
 jobs:
   build:
@@ -98,6 +101,8 @@ jobs:
           - name: linux-x86_64
             os: ubuntu-22.04
             bundles: appimage,deb,rpm
+            # linuxdeploy 失败时 tauri 只报一句 failed to run linuxdeploy，要 --verbose 才有它的输出
+            extra_args: --verbose
           - name: macos-aarch64
             os: macos-latest
             # dmg 由 Tauri 自带的打包器产出；不稳的话见下面的 retryAttempts
@@ -273,7 +278,7 @@ jobs:
         with:
           projectPath: src
           tauriScript: pnpm tauri
-          args: --bundles ${{ matrix.bundles }}
+          args: --bundles ${{ matrix.bundles }} ${{ matrix.extra_args }}
           tagName: ${{ steps.resolve.outputs.release_tag }}
           releaseName: ${{ steps.resolve.outputs.release_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
@@ -301,7 +306,7 @@ jobs:
         with:
           projectPath: src
           tauriScript: pnpm tauri
-          args: --bundles ${{ matrix.bundles }}
+          args: --bundles ${{ matrix.bundles }} ${{ matrix.extra_args }}
           includeUpdaterJson: false
           retryAttempts: 2
 
