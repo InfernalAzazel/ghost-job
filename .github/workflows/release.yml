@@ -10,6 +10,11 @@
 #   - 从 tag 写版本号：它的 `__VERSION__` 是拿项目版本号去替换 tag 名，方向是反的
 #   - 更新日志：在私有仓库里，读出来塞进 `releaseBody`
 #
+# 后端是 Python（`src-python/`），由 `tauri.conf.json` 的 beforeBuildCommand 调
+# `uv run tauri-runtime build` 用 Nuitka 编成独立二进制，再作为 resources 打进安装包。所以每个
+# 平台除了 Node/Rust 还要有 uv 和 C 编译器：macOS/Windows runner 自带 clang/MSVC，Linux 自带
+# gcc，但 Nuitka 的 standalone 在 Linux 上还要 `patchelf`。Python 版本钉在 3.12，与本地一致。
+#
 # 应用内自动更新用 Tauri 自带的 updater：`createUpdaterArtifacts` 让每个平台额外产出带签名的
 # 更新包（macOS 的 .app.tar.gz、Windows 的 -setup.exe/.msi、Linux 的 .AppImage，各配一个 .sig），
 # tauri-action 把四个腿的更新包汇总成 Release 里的 `latest.json`，应用从
@@ -22,7 +27,7 @@
 # action 版本钉在「恰好切到 node24 的最低主版本」，不追最新：node20 已被 runner 强制换运行时并逐
 # job 告警（2025-09-19 的 deprecation，github.blog/changelog），但升主版本可能改行为，取最低的
 # 那个风险最小。当前 checkout / setup-node / pnpm-action-setup 为 v5，upload-artifact 为 v6
-# ——upload-artifact 的 v5 仍是 node20，必须 v6。改这几个版本后，正式发版前先
+# ——upload-artifact 的 v5 仍是 node20，必须 v6；setup-uv 为 v7（v6 仍是 node20）。改这几个版本后，正式发版前先
 # `scripts/release.sh <版本> --rehearse` 把四个平台验一遍。
 #
 # 为什么在私有仓库里不放在 `.github/workflows/` 下：那里只有公有仓库会跑它（`SRC_TOKEN` 和
@@ -170,7 +175,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev build-essential curl wget file \
-            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev rpm
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev rpm patchelf
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: src/src-python/uv.lock
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -197,6 +209,7 @@ jobs:
           set -euo pipefail
           # [package] 的 version 顶格，依赖的版本都是缩进的，整行匹配不会误伤
           grep -qxF "version = \"${APP_VERSION}\"" src-tauri/Cargo.toml
+          grep -qxF "version = \"${APP_VERSION}\"" src-python/pyproject.toml
           # 两个 JSON 用 node 读，避免在依赖的版本号里碰到巧合的同名值
           node -e '
             const want = process.argv[1];
@@ -209,7 +222,13 @@ jobs:
               }
             }
           ' "$APP_VERSION"
-          echo "三处版本号都是 ${APP_VERSION}"
+          echo "各处版本号都是 ${APP_VERSION}"
+
+      - name: Install backend dependencies
+        # 在写版本号之后装：set-version 会改 uv.lock 里本项目的版本。--locked 让 lock 与
+        # pyproject 不一致时当场失败，而不是构建时悄悄重新解析依赖
+        working-directory: src/src-python
+        run: uv sync --locked
 
       - name: Assert the signing key
         # 没有私钥时 createUpdaterArtifacts 会让构建在最后一步才失败，这里提前挡住
