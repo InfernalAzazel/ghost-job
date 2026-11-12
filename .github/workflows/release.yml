@@ -103,6 +103,9 @@ jobs:
             bundles: appimage,deb,rpm
             # linuxdeploy 失败时 tauri 只报一句 failed to run linuxdeploy，要 --verbose 才有它的输出
             extra_args: --verbose
+            # Nuitka 把 libscipy_openblas 放在产物根目录，但给 numpy 扩展模块写的 RPATH 没指到那里，
+            # linuxdeploy 逐个解析依赖时就找不到它，要靠 LD_LIBRARY_PATH 补上（相对仓库工作区）
+            lib_dir: src/src-python/dist/py-backend
           - name: macos-aarch64
             os: macos-latest
             # dmg 由 Tauri 自带的打包器产出；不稳的话见下面的 retryAttempts
@@ -275,6 +278,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          LD_LIBRARY_PATH: ${{ matrix.lib_dir && format('{0}/{1}', github.workspace, matrix.lib_dir) || '' }}
         with:
           projectPath: src
           tauriScript: pnpm tauri
@@ -303,6 +307,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          LD_LIBRARY_PATH: ${{ matrix.lib_dir && format('{0}/{1}', github.workspace, matrix.lib_dir) || '' }}
         with:
           projectPath: src
           tauriScript: pnpm tauri
