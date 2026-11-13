@@ -41,11 +41,11 @@ Ghost Job is a free desktop app (Windows / macOS / Linux) that automates job app
 
 ## 自动投递效果
 
-左边是 BOSS 直聘，右边是 Ghost Job：投递时自动跳过看过的岗位并写明原因，在岗位管理里按「合适 / 不合适」查看判断结果，在配置中心随时调整求职方向和投递节奏。
+从启动动画开始，左边是 BOSS 直聘，右边是 Ghost Job：自动投递、自动回复、求职分析、查企业，再到配置中心的岗位筛选、发送作品、问答库和 AI 服务，最后切换浅色 / 深色外观。
 
 ![自动投递效果](assets/videos/auto-apply.webp)
 
-更高清的版本（2560×1320）：[下载视频](assets/videos/auto-apply.mp4)
+带配音和音效的高清版本（2560×1334）：[下载视频](assets/videos/auto-apply.mp4)
 
 ## 一个求职段子
 
@@ -371,6 +371,8 @@ HR 问「有没有做过 SaaS 项目」「能看看你的作品吗」时，AI �
 - 支持搜索、按状态筛选，勾选后批量启用、停用、移到其他分组或删除；左侧分组栏可以勾选多个分组一起删除
 - 可以导入 `.zip`、`SKILL.md` 或整个文件夹，也能导出某个分组或全部问答，方便备份和换电脑
 - 问答以 `SKILL.md` 文件保存在数据目录的 `skills/` 下，每个分组一个文件夹
+
+![问答库](assets/screenshots/config-skills.png)
 
 **沟通状态**：每个会话有一个沟通状态，AI 回复时会自动更新：
 
